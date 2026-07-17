@@ -89,6 +89,24 @@ removed and the board powered: the mainboard **TX idles at ~5 V**, the RX does n
 **Remove the original WiFi module first** — one master only on the bus. Keep it
 in a drawer: the swap is fully reversible.
 
+## Carrier board (coming soon)
+
+A dedicated carrier board is in the works — not a PCB from a fab house, but a
+**3D-printed one**: the board is printed in PLA with the traces as raised
+ridges, self-adhesive copper tape is then laid over the ridges, and the
+components are soldered directly onto the copper. A cheap, fast way to get a
+rigid, reliable single-purpose board with no etching and no waiting for
+shipping — well suited to a project like this where the "circuit" is really
+just interconnections.
+
+The board hosts:
+- headers for the D1 mini
+- the 4-channel level shifter module
+- a 4-pin header for the final connection to the fancoil (5V, GND, TX, RX)
+- two holes for the GPIO15 boot pull-down resistor
+
+STL/design files will be added to this repository once finalized.
+
 ## Install
 
 1. Copy `components/innova_osmo/` into your ESPHome config dir under `components/`.
