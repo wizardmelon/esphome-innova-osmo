@@ -1,0 +1,99 @@
+# Fancoil Innova OSMO — sostituzione del modulo INNOVA-WIFI con Lolin D1 mini.
+# Per un nuovo fancoil: copia questo file, cambia SOLO le substitutions qui sotto.
+#
+# ⚠ IL BUS DELLA SCHEDA MADRE E' IN DOMINIO 5V (il TX della scheda idla a ~5V):
+#   serve un level shifter bidirezionale (modulo 4ch BSS138) su entrambe le linee.
+#   NON collegare mai le linee dati direttamente all'ESP.
+#
+# ⚠ PERICOLO PIN EN: sul pettine sinistro il pin EN e' adiacente ai due pin 12V
+#   (5° e 6° pin). Un contatto accidentale EN<->12V distrugge ISTANTANEAMENTE il
+#   chip proprietario che gestisce la scheda madre (irreperibile come ricambio).
+#
+# Cablaggio D1 mini <-> level shifter <-> pettine J3/J4 (il D1 mini prende il posto
+# del modulo originale, stesso ruolo di master Modbus, quindi niente incrocio TX/RX):
+#   shifter HV  -> 5V pettine        shifter LV  -> 3V3 D1 mini
+#   shifter GND -> GND (comune con D1 mini)
+#   HV1 -> linea TX-scheda (idle ~5V)   LV1 -> D7 (GPIO13, RX ESP)
+#   HV2 -> linea RX-scheda (idle ~1.5V) LV2 -> D8 (GPIO15, TX ESP)
+#   5V pettine -> 5V D1 mini (rail verificato: 4.99V)
+# OBBLIGATORIO: resistenza 1 kOhm tra D8 e GND (GPIO15 e' strap di boot: deve
+# essere basso all'accensione; la pull-up del canale shifter altrimenti lo tira su).
+# Il modulo WiFi originale va RIMOSSO prima di collegare l'ESP (un solo master sul bus).
+#
+# friendly_name determines the HA entity_id: "Fancoil 1" -> climate.fancoil_1
+
+substitutions:
+  name: fancoil-1
+  friendly_name: Fancoil 1
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp8266:
+  board: d1_mini
+
+# Logger seriale disabilitato: UART0 (in swap su GPIO15/13) e' dedicata al Modbus.
+logger:
+  baud_rate: 0
+
+api:
+  encryption:
+    key: !secret fancoil_api_key
+
+ota:
+  - platform: esphome
+    password: !secret fancoil_ota_password
+
+wifi:
+  power_save_mode: none
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+  ap:
+    ssid: "${name} Fallback"
+    password: !secret wifi_password
+
+captive_portal:
+
+status_led:
+  pin:
+    number: GPIO2
+    inverted: true
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+# UART0 hardware in modalita' swap: GPIO15=TX (pin D8), GPIO13=RX (pin D7).
+# Niente CH340 di mezzo (i pin GPIO1/GPIO3 del D1 mini sono inutilizzabili per
+# ricevere da dispositivi esterni: il convertitore USB di bordo carica la linea).
+# Bonus: il garbage del bootloader a 74880 baud esce solo su GPIO1: la scheda
+# madre non lo vede.
+uart:
+  id: uart_bus
+  tx_pin: GPIO15
+  rx_pin: GPIO13
+  baud_rate: 9600
+  stop_bits: 1
+
+modbus:
+  uart_id: uart_bus
+
+climate:
+  - platform: innova_osmo
+    name: ""              # entita' climate principale: prende il friendly_name
+    address: 1            # slave address della scheda madre (verificato: 1)
+    update_interval: 10s
+
+    air_temperature:
+      name: Temperatura
+
+    water_alarm:
+      name: Allarme acqua
+
+    # Valore grezzo del registro status (151): utile per scoprire altri bit
+    # di allarme. Rimuovilo quando non serve piu'.
+    status_raw:
+      name: Status raw
