@@ -70,11 +70,6 @@ pull-up would float it high. The **1 kΩ resistor from D8 to GND** fixes that.
 
 ### Wiring
 
-The silkscreen on the back of the original WiFi module labels the header pins
-(`12V GND TX RX EN` + a 5 V pair). Those names are from the **module's**
-perspective, and the D1 mini takes the module's place — so there is no TX/RX
-crossover, but everything goes through the level shifter.
-
 Where the pins sit on the mainboard (photo taken with the WiFi module removed):
 
 ![Mainboard module headers pinout](docs/images/mainboard-pinout.png)
@@ -84,16 +79,34 @@ bottom: **GND**, three unidentified pins, **5V, 5V**. Green = the pins this
 project uses (5V, GND, TX, RX); red = stay away (`EN` sits right next to the
 12 V pins — see the warning at the top); grey = purpose unknown.
 
+The silkscreen labels are from the **module's** perspective (its `RX` pin
+receives from the mainboard's TX). The D1 mini takes the module's place, so
+ESP RX goes to the pin labelled `RX` and ESP TX to the pin labelled `TX` —
+no crossover. Pin by pin, left header in the photo, top to bottom:
+
+| Pin (top→bottom) | Silkscreen | Idle level (module removed) | Role | Connect to (through shifter) |
+|---|---|---|---|---|
+| 1 | `RX` | **~5 V** | Mainboard TX → data out | **D7** (GPIO13, ESP RX) |
+| 2 | `GND` | — | Ground | GND |
+| 3 | `TX` | low (~1.5 V) | Mainboard RX ← data in | **D8** (GPIO15, ESP TX) + 1 kΩ to GND |
+| 4 | `EN` | — | **Do not touch** (see warning) | — |
+| 5–6 | `12V` | 12 V | Not used | — |
+
+Right header: the two bottom `5V` pins power the D1 mini (and the shifter HV
+side), `GND` on top. Sanity check before wiring: the pin labelled `RX` (1st
+from top) is the only data pin that idles at ~5 V.
+
+Everything goes through the level shifter:
+
 | Mainboard header | Level shifter | D1 mini |
 |---|---|---|
 | 5V | HV | 5V (power) |
 | — | LV | 3V3 |
 | GND | GND | GND |
-| TX line (idles ~5 V) | HV1 ↔ LV1 | D7 (GPIO13, ESP RX) |
-| RX line (idles ~1.5 V) | HV2 ↔ LV2 | D8 (GPIO15, ESP TX) |
+| `RX` pin (mainboard TX, idles ~5 V) | HV1 ↔ LV1 | D7 (GPIO13, ESP RX) |
+| `TX` pin (mainboard RX, idles ~1.5 V) | HV2 ↔ LV2 | D8 (GPIO15, ESP TX) |
 
-Plus the 1 kΩ from D8 to GND. To identify the two data lines with the module
-removed and the board powered: the mainboard **TX idles at ~5 V**, the RX does not.
+Plus the 1 kΩ from D8 to GND.
 
 **Remove the original WiFi module first** — one master only on the bus. Keep it
 in a drawer: the swap is fully reversible.

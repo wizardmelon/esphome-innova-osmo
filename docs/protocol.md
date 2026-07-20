@@ -14,7 +14,8 @@ turned out to be enough).
 
 1. Multimeter first, ideally with the unit powered off between measurements.
    Note the bus is a **5 V domain**: with the module removed the mainboard TX
-   idles at ~5 V (with the module inserted the level sits lower). A 3.3 V
+   — the pin the module silkscreen labels `RX`, 1st from the top — idles at
+   ~5 V (with the module inserted the level sits lower). A 3.3 V
    adapter reads it fine for sniffing, but keep this in mind for anything you
    connect permanently — and stay clear of the EN pin, which sits next to the
    two 12 V pins on the left header (see the warning in the README).
