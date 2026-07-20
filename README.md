@@ -73,7 +73,16 @@ pull-up would float it high. The **1 kΩ resistor from D8 to GND** fixes that.
 The silkscreen on the back of the original WiFi module labels the header pins
 (`12V GND TX RX EN` + a 5 V pair). Those names are from the **module's**
 perspective, and the D1 mini takes the module's place — so there is no TX/RX
-crossover, but everything goes through the level shifter:
+crossover, but everything goes through the level shifter.
+
+Where the pins sit on the mainboard (photo taken with the WiFi module removed):
+
+![Mainboard module headers pinout](docs/images/mainboard-pinout.png)
+
+Left header, top to bottom: **RX, GND, TX, EN, 12V, 12V**. Right header, top to
+bottom: **GND**, three unidentified pins, **5V, 5V**. Green = the pins this
+project uses (5V, GND, TX, RX); red = stay away (`EN` sits right next to the
+12 V pins — see the warning at the top); grey = purpose unknown.
 
 | Mainboard header | Level shifter | D1 mini |
 |---|---|---|
