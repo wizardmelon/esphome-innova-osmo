@@ -34,6 +34,11 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
   uint16_t value = (uint16_t(data[0]) << 8) | uint16_t(data[1]);
   float f_value = value / 10.0f;
 
+  // Dump temporaneo per confronto incrociato registri vs stato reale del fancoil.
+  // Rimuovere una volta identificato il bit di feedback attivo/idle.
+  ESP_LOGD(TAG, "poll state=%d reg=%u raw=%u (0x%04X)", this->state_,
+           POLL_REGISTERS[this->state_ - 1], value, value);
+
   switch (this->state_) {
     case 1:  // REG_AIR_TEMP
       this->current_temperature = f_value;
