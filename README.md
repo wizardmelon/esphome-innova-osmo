@@ -42,10 +42,26 @@ The link between mainboard (slave, address 1) and WiFi module (master) is
 | Register | Meaning | Access | Values |
 |----------|---------|--------|--------|
 | 0 | Room temperature ×10 | RO | e.g. 259 = 25.9 °C |
+| 1 | Water supply temperature ×10 | RO | plausible from observed behavior, not from documentation |
+| 15 | Fan speed, raw inverter reading | RO | 0 = stopped; ~1100 = auto (throttled); ~1500 = max. This is the actual running feedback — see below |
 | 151 | Status/alarms bitfield | RO | bit9 = water temperature out of range |
 | 305 | Setpoint ×10 | R/W | 255 = sentinel written by cloud while OFF |
 | 553 | Program bitfield | R/W | bits 0-2: fan 0=auto 1=night 2=max; bit4 = standby |
 | 556 | Season | R/W | 0=auto, 1=heating, 2=cooling |
+
+### `climate.action` (idle vs actually heating/cooling)
+
+The mainboard has no single relay/compressor status bit we could find (register
+9, which carries that role on the AirLeaf, turned out to be a counter-like
+value on the OSMO — not a clean flag). Register 15 turned out to be a much
+better signal: it's the **live inverter fan reading**, and empirically it goes
+to exactly 0 whenever the unit stops actively heating/cooling (verified with an
+A/B test: raising the setpoint past room temperature to force the unit to stop,
+then back down to force it to run again, several times). `climate.action`
+is derived from this: fan reading above a small noise threshold → HEATING or
+COOLING (per the season register); at or below it → IDLE. This has been
+validated on cooling; heating should behave the same way (same physical
+feedback path) but hasn't been tested yet — update this note once confirmed.
 
 ## Hardware
 
@@ -113,8 +129,10 @@ STL/design files will be added to this repository once finalized.
 2. Copy `example-fancoil.yaml`, adjust the `substitutions:` block and your
    WiFi/API/OTA secrets.
 3. Flash, wire, done. You get a full `climate` entity (off/heat/cool/auto,
-   fan auto/night/max, setpoint 16-30 °C), a room temperature sensor, a
-   "water out of range" problem binary sensor, and a diagnostic raw status value.
+   fan auto/night/max, setpoint 16-30 °C, and a correctly reported
+   idle/heating/cooling action), a room temperature sensor, a water supply
+   temperature sensor, a fan speed percentage sensor, a "water out of range"
+   problem binary sensor, and a diagnostic raw status value.
 
 ## Reverse-engineering toolkit
 

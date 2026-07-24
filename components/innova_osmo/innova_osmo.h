@@ -7,10 +7,20 @@
 //
 // Mappa registri OSMO (diversa dall'AirLeaf dei repo pico1881!):
 //   0   T aria x10 (RO)
+//   1   T acqua mandata x10 (RO) - plausibile per comportamento fisico osservato
+//   15  velocita' ventola inverter, valore grezzo tipo RPM (RO) - 0 = ferma
 //   151 status/allarmi (RO) - bit9 = acqua fuori range (osservato attivo)
 //   305 setpoint x10 (R/W) - 255 = sentinella scritta dal cloud a unita' OFF
 //   553 program (R/W) - bit0-2: fan 0=auto 1=night 2=max; bit4 = standby/OFF
 //   556 season (R/W) - 0=auto 1=caldo 2=freddo
+//
+// climate::action: derivato da reg 15 (velocita' ventola reale), non dal solo
+// season/program. Confermato empiricamente il 2026-07-17: reg 15 passa da 0
+// (unita' ferma, target sopra la temperatura ambiente) a ~1100 (ventola auto
+// modulata) a ~1500 (ventola max) durante raffreddamento attivo. Non ancora
+// verificato in riscaldamento (impossibile testare: pdc produceva solo acqua
+// fredda al momento della misura) - la soglia dovrebbe comunque valere anche
+// li', essendo un feedback fisico del motore e non dello stato season/program.
 // Derivato dal componente innova_climate di @pico1881 (MIT).
 
 #include "esphome/components/modbus/modbus.h"
@@ -26,16 +36,25 @@ namespace innova_osmo {
 static const uint8_t CMD_READ_REG = 0x03;
 static const uint8_t CMD_WRITE_REG = 0x06;
 
-static const uint16_t REG_AIR_TEMP = 0;     // x10
-static const uint16_t REG_STATUS = 151;     // bitfield allarmi
-static const uint16_t REG_SETPOINT = 305;   // x10
-static const uint16_t REG_PROGRAM = 553;    // fan + standby
+static const uint16_t REG_AIR_TEMP = 0;      // x10
+static const uint16_t REG_WATER_TEMP = 1;    // x10, temperatura acqua mandata
+static const uint16_t REG_FAN_SPEED = 15;    // grezzo tipo RPM, 0 = ferma
+static const uint16_t REG_STATUS = 151;      // bitfield allarmi
+static const uint16_t REG_SETPOINT = 305;    // x10
+static const uint16_t REG_PROGRAM = 553;     // fan + standby
 static const uint16_t REG_SEASON = 556;
 
 static const uint16_t PROGRAM_FAN_MASK = 0x0007;   // 0=auto 1=night 2=max
 static const uint16_t PROGRAM_STANDBY_MASK = 0x0010;
 static const uint16_t STATUS_WATER_ALARM_MASK = 0x0200;  // bit9, da confermare altri bit
 static const uint16_t SETPOINT_OFF_SENTINEL = 255;
+
+// Calibrazione percentuale ventola: massimo osservato empiricamente ~1504
+// con fan mode "max" (con margine), minimo 0 = ventola ferma. Da raffinare
+// se si osservano letture superiori.
+static const float FAN_SPEED_MAX_READING = 1550.0f;
+// Sotto questa soglia consideriamo la ventola ferma (rumore/transitori).
+static const uint16_t FAN_SPEED_RUNNING_THRESHOLD = 20;
 
 struct WriteableData {
   uint8_t function_value;
@@ -46,6 +65,8 @@ struct WriteableData {
 class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, public modbus::ModbusDevice {
  public:
   void set_air_temperature_sensor(sensor::Sensor *s) { air_temperature_sensor_ = s; }
+  void set_water_temperature_sensor(sensor::Sensor *s) { water_temperature_sensor_ = s; }
+  void set_fan_speed_percent_sensor(sensor::Sensor *s) { fan_speed_percent_sensor_ = s; }
   void set_status_raw_sensor(sensor::Sensor *s) { status_raw_sensor_ = s; }
   void set_water_alarm_sensor(binary_sensor::BinarySensor *s) { water_alarm_sensor_ = s; }
 
@@ -90,6 +111,8 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
   void control(const climate::ClimateCall &call) override;
 
   sensor::Sensor *air_temperature_sensor_{nullptr};
+  sensor::Sensor *water_temperature_sensor_{nullptr};
+  sensor::Sensor *fan_speed_percent_sensor_{nullptr};
   sensor::Sensor *status_raw_sensor_{nullptr};
   binary_sensor::BinarySensor *water_alarm_sensor_{nullptr};
 };

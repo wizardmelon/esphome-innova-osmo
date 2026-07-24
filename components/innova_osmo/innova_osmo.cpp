@@ -1,13 +1,16 @@
 #include "innova_osmo.h"
 #include "esphome/core/log.h"
+#include <algorithm>
 
 namespace esphome {
 namespace innova_osmo {
 
 static const char *const TAG = "innova_osmo";
 
-// Ciclo di poll: 1=T aria, 2=setpoint, 3=program, 4=season, 5=status
-static const uint16_t POLL_REGISTERS[] = {REG_AIR_TEMP, REG_SETPOINT, REG_PROGRAM, REG_SEASON, REG_STATUS};
+// Ciclo di poll: 1=T aria, 2=setpoint, 3=program, 4=season, 5=status,
+// 6=T acqua, 7=velocita' ventola (quest'ultima determina anche climate::action).
+static const uint16_t POLL_REGISTERS[] = {REG_AIR_TEMP,  REG_SETPOINT, REG_PROGRAM,   REG_SEASON,
+                                           REG_STATUS,    REG_WATER_TEMP, REG_FAN_SPEED};
 static const int POLL_STATES = sizeof(POLL_REGISTERS) / sizeof(POLL_REGISTERS[0]);
 
 void InnovaOsmo::setup() {}
@@ -64,9 +67,8 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
           case 2: this->mode = climate::CLIMATE_MODE_COOL; break;
           default: this->mode = climate::CLIMATE_MODE_HEAT_COOL; break;
         }
-        // Non abbiamo (ancora) un registro di feedback ventola/relè per
-        // distinguere heating/cooling attivo da idle.
-        this->action = climate::CLIMATE_ACTION_IDLE;
+        // action determinata piu' avanti nel ciclo (case REG_FAN_SPEED), dal
+        // feedback reale del motore ventola.
       }
       break;
     case 5:  // REG_STATUS
@@ -75,6 +77,30 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
       if (this->status_raw_sensor_ != nullptr)
         this->status_raw_sensor_->publish_state(value);
       break;
+    case 6:  // REG_WATER_TEMP
+      if (this->water_temperature_sensor_ != nullptr)
+        this->water_temperature_sensor_->publish_state(f_value);
+      break;
+    case 7: {  // REG_FAN_SPEED
+      float pct = std::min(100.0f, (value / FAN_SPEED_MAX_READING) * 100.0f);
+      if (this->fan_speed_percent_sensor_ != nullptr)
+        this->fan_speed_percent_sensor_->publish_state(pct);
+
+      // climate::action: la ventola inverter gira solo quando l'unita' sta
+      // davvero scaldando/raffreddando. Confermato empiricamente (vedi header).
+      if (!(this->program_ & PROGRAM_STANDBY_MASK)) {
+        if (value > FAN_SPEED_RUNNING_THRESHOLD) {
+          switch (this->season_) {
+            case 1: this->action = climate::CLIMATE_ACTION_HEATING; break;
+            case 2: this->action = climate::CLIMATE_ACTION_COOLING; break;
+            default: this->action = climate::CLIMATE_ACTION_IDLE; break;
+          }
+        } else {
+          this->action = climate::CLIMATE_ACTION_IDLE;
+        }
+      }
+      break;
+    }
   }
 
   if (++this->state_ > POLL_STATES) {

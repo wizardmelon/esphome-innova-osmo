@@ -7,6 +7,8 @@ from esphome.const import (
     DEVICE_CLASS_PROBLEM,
     STATE_CLASS_MEASUREMENT,
     UNIT_CELSIUS,
+    UNIT_PERCENT,
+    ICON_FAN,
     ENTITY_CATEGORY_DIAGNOSTIC,
 )
 
@@ -18,6 +20,8 @@ InnovaOsmo = innova_osmo_ns.class_(
 )
 
 CONF_AIR_TEMPERATURE = "air_temperature"
+CONF_WATER_TEMPERATURE = "water_temperature"
+CONF_FAN_SPEED_PERCENT = "fan_speed_percent"
 CONF_WATER_ALARM = "water_alarm"
 CONF_STATUS_RAW = "status_raw"
 
@@ -30,6 +34,18 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=1,
                 device_class=DEVICE_CLASS_TEMPERATURE,
                 state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_WATER_TEMPERATURE): sensor.sensor_schema(
+                unit_of_measurement=UNIT_CELSIUS,
+                accuracy_decimals=1,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_FAN_SPEED_PERCENT): sensor.sensor_schema(
+                unit_of_measurement=UNIT_PERCENT,
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+                icon=ICON_FAN,
             ),
             cv.Optional(CONF_WATER_ALARM): binary_sensor.binary_sensor_schema(
                 device_class=DEVICE_CLASS_PROBLEM,
@@ -53,6 +69,12 @@ async def to_code(config):
     if CONF_AIR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_AIR_TEMPERATURE])
         cg.add(var.set_air_temperature_sensor(sens))
+    if CONF_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_WATER_TEMPERATURE])
+        cg.add(var.set_water_temperature_sensor(sens))
+    if CONF_FAN_SPEED_PERCENT in config:
+        sens = await sensor.new_sensor(config[CONF_FAN_SPEED_PERCENT])
+        cg.add(var.set_fan_speed_percent_sensor(sens))
     if CONF_WATER_ALARM in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_WATER_ALARM])
         cg.add(var.set_water_alarm_sensor(sens))

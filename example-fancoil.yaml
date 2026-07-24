@@ -90,6 +90,12 @@ climate:
     air_temperature:
       name: Temperatura
 
+    water_temperature:
+      name: Temperatura acqua
+
+    fan_speed_percent:
+      name: Ventola
+
     water_alarm:
       name: Allarme acqua
 

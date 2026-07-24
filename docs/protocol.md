@@ -40,11 +40,45 @@ repeated — a textbook Modbus RTU read request, valid CRC.
 | Register | Meaning | Access | Notes |
 |----------|---------|--------|-------|
 | 0 | Room temperature ×10 | RO | 259 = 25.9 °C, matches app display exactly |
+| 1 | Water supply temperature ×10 | RO | Not from documentation — inferred from behavior: tracks a plausible chilled-water range (13-19°C observed) and drifts toward supply temperature when the fancoil's own valve closes (unit stopped) with reduced mixing. Same address as AirLeaf's water temperature register. |
+| 9 | Unknown | RO | Same address as AirLeaf's relay/output register, but does **not** behave like a bitfield on the OSMO — observed incrementing/decrementing by 1 across consecutive ~10s polls, i.e. counter-like. Not used. If you figure out what it is, please open a PR. |
+| 15 | Fan speed, raw reading | RO | Same address as AirLeaf's fan speed register. On the OSMO this is a live inverter reading, not a fixed set of levels: 0 when the fan is stopped, ~1100 with fan mode "auto" (throttled), ~1500-1504 with fan mode "max". **This is the cleanest "is the unit actually running" signal found so far** — see the `climate.action` section below. |
 | 151 | Status/alarm bitfield | RO | `0x0200` (bit9) seen while the "water out of range" alarm was active. Other bits unmapped. |
 | 305 | Setpoint ×10 | R/W | App writes e.g. 230 = 23.0 °C. Value **255** is a sentinel the cloud writes/leaves while the unit is OFF — ignore it when reading. |
 | 553 | Program bitfield | R/W | bits 0-2: fan mode — 0 = auto, 1 = night, 2 = max. bit4 (`+16`): standby. Power OFF = write current value with bit4 set (e.g. 17 = night + standby); power ON = same with bit4 cleared. |
 | 556 | Season | R/W | 0 = auto, 1 = heating, 2 = cooling |
 | 60002 | Unknown, 32 bit (read ×2) | RO | Always 0 during captures |
+
+## Finding the "actually running" feedback (register 15)
+
+The component originally reported `climate.action` as always IDLE while the
+unit was on, because no register in the initial map distinguished "enabled,
+waiting" from "enabled, actively heating/cooling". Register 9 was the prime
+suspect (it plays that role on the AirLeaf), but sniffing it live showed
+values incrementing/decrementing by 1 across consecutive polls — a
+counter/timer, not a status bitfield, and not safe to build logic on with the
+data gathered so far.
+
+Register 15 (fan speed on the AirLeaf) turned out to be the answer, found via
+a simple A/B test: with the unit actively cooling, poll it repeatedly; then
+push the setpoint far above room temperature to force the unit to stop, and
+poll again.
+
+```
+cooling, fan "max"     -> reg15 ≈ 1497-1504
+cooling, fan "auto"     -> reg15 ≈ 1098-1100  (throttled by the inverter)
+stopped (setpoint above room temp) -> reg15 = 0, exactly, repeatedly
+```
+
+The fan is inverter-driven and power-modulated, so register 15 isn't a fixed
+"speed level" — it's a close-to-real-time RPM-like reading that responds to
+actual load. Zero means the fan is physically not spinning, which on this unit
+only happens when it isn't heating/cooling. The component maps this (above a
+small noise threshold) combined with the season register to
+`CLIMATE_ACTION_HEATING`/`CLIMATE_ACTION_COOLING`, and to `CLIMATE_ACTION_IDLE`
+otherwise. Verified on cooling only — heating should behave identically (same
+physical fan feedback) but hasn't been tested (the heat pump was only
+producing chilled water at the time).
 
 ## Master polling pattern (stock module)
 
