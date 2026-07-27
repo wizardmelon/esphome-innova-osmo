@@ -146,6 +146,30 @@ frame decoder + non-Modbus framing characterizer) are included — they are
 generic and reusable for sniffing any serial protocol. See
 [docs/protocol.md](docs/protocol.md) for the method.
 
+### Mapping a different board (e.g. multi-zone controllers)
+
+The register map in `components/innova_osmo` was reverse-engineered on the
+single-zone `ESE845II`/`INNOVA-M7-V0_3` mainboard. Other Innova boards
+(e.g. multi-zone controllers) may share it or may not — don't assume
+without checking.
+
+`example-sniffer.yaml` + `tools/wizard.py` let you check this over WiFi,
+**without removing the stock WiFi/cloud module or any wired thermostats**:
+the sniffer firmware only listens (RX) and never writes to the bus, so
+there's no master-conflict risk. Flash it, then run:
+
+```
+tools/wizard.py example-sniffer.yaml --device <esp-host>
+```
+
+The wizard asks you to label an action (e.g. "zone 3 fan on"), tells you to
+trigger it from the app/remote/thermostat, sniffs the bus for a few
+seconds, decodes any Modbus frames, and at the end prints a table
+comparing register values across all the actions you tried — registers
+whose value changed between actions are flagged as candidates. The raw
+session (bytes + labels) is also saved as JSONL, replayable with
+`tools/analyze.py`.
+
 ## Credits
 
 - Component structure derived from [pico1881/Esphome-Innova-Climate](https://github.com/pico1881/Esphome-Innova-Climate) (AirLeaf).
