@@ -114,6 +114,16 @@ climate:
     address: 1            # mainboard slave address (verified: 1)
     update_interval: 10s
 
+    # Explicit so the setpoint is adjustable in tenths of a degree regardless
+    # of ESPHome's default: register 305 is already in tenths (target*10), so
+    # this step is only a UI/HA-side limit, not a protocol one.
+    visual:
+      min_temperature: 16 °C
+      max_temperature: 30 °C
+      temperature_step:
+        target_temperature: 0.1
+        current_temperature: 0.1
+
     air_temperature:
       name: Temperature
 

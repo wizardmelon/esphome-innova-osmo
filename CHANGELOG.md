@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.1 — 2026-07-28
+
+**Expose tenth-of-a-degree setpoint resolution.** Register 305 is already
+written as `target * 10` (i.e. natively in tenths of a degree) — nothing in
+the write path rounds it to halves. The only thing forcing coarser steps was
+ESPHome's climate `visual` block being left unset. `example-fancoil.yaml` now
+sets it explicitly:
+
+```yaml
+visual:
+  min_temperature: 16 °C
+  max_temperature: 30 °C
+  temperature_step:
+    target_temperature: 0.1
+    current_temperature: 0.1
+```
+
+`min_temperature`/`max_temperature` are set to match the 16–30 °C clamp
+already used by the setpoint-compensation path, since without a reference
+sensor configured `control()` writes the raw setpoint unclamped.
+
+Whether the OSMO mainboard actually *honors* tenth-of-a-degree setpoints, or
+silently snaps them to the nearest 0.5° internally, is unverified — every
+setpoint tested so far has ended in `.0` or `.5`. Worth checking against the
+debug log (`ESP_LOGD` dump of the setpoint register) after setting something
+like 21.3 °C.
+
 ## v0.3.0 — 2026-07-28
 
 **Added: optional external reference sensor for compensated setpoint control.**
