@@ -1,24 +1,27 @@
-# Fancoil Innova OSMO — sostituzione del modulo INNOVA-WIFI con Lolin D1 mini.
-# Per un nuovo fancoil: copia questo file, cambia SOLO le substitutions qui sotto.
+# Innova OSMO fancoil — replaces the INNOVA-WIFI module with a Lolin D1 mini.
+# For a new fancoil: copy this file, change ONLY the substitutions below.
 #
-# ⚠ IL BUS DELLA SCHEDA MADRE E' IN DOMINIO 5V (il TX della scheda idla a ~5V):
-#   serve un level shifter bidirezionale (modulo 4ch BSS138) su entrambe le linee.
-#   NON collegare mai le linee dati direttamente all'ESP.
+# WARNING: THE MAINBOARD BUS IS IN THE 5V DOMAIN (its TX idles at ~5V):
+#   you need a bidirectional level shifter (4ch BSS138 module) on both lines.
+#   NEVER wire the data lines straight to the ESP.
 #
-# ⚠ PERICOLO PIN EN: sul pettine sinistro il pin EN e' adiacente ai due pin 12V
-#   (5° e 6° pin). Un contatto accidentale EN<->12V distrugge ISTANTANEAMENTE il
-#   chip proprietario che gestisce la scheda madre (irreperibile come ricambio).
+# WARNING: EN PIN DANGER: on the left header, the EN pin sits right next to
+#   the two 12V pins (5th and 6th pin). Accidentally bridging EN to 12V
+#   INSTANTLY destroys the proprietary chip that runs the mainboard (no spare
+#   part available).
 #
-# Cablaggio D1 mini <-> level shifter <-> pettine J3/J4 (il D1 mini prende il posto
-# del modulo originale, stesso ruolo di master Modbus, quindi niente incrocio TX/RX):
-#   shifter HV  -> 5V pettine        shifter LV  -> 3V3 D1 mini
-#   shifter GND -> GND (comune con D1 mini)
-#   HV1 -> linea TX-scheda (idle ~5V)   LV1 -> D7 (GPIO13, RX ESP)
-#   HV2 -> linea RX-scheda (idle ~1.5V) LV2 -> D8 (GPIO15, TX ESP)
-#   5V pettine -> 5V D1 mini (rail verificato: 4.99V)
-# OBBLIGATORIO: resistenza 1 kOhm tra D8 e GND (GPIO15 e' strap di boot: deve
-# essere basso all'accensione; la pull-up del canale shifter altrimenti lo tira su).
-# Il modulo WiFi originale va RIMOSSO prima di collegare l'ESP (un solo master sul bus).
+# Wiring D1 mini <-> level shifter <-> J3/J4 header (the D1 mini takes the
+# place of the original module, same role as Modbus master, so no TX/RX swap):
+#   shifter HV  -> 5V header          shifter LV  -> 3V3 D1 mini
+#   shifter GND -> GND (shared with D1 mini)
+#   HV1 -> mainboard TX line (idle ~5V)    LV1 -> D7 (GPIO13, ESP RX)
+#   HV2 -> mainboard RX line (idle ~1.5V)  LV2 -> D8 (GPIO15, ESP TX)
+#   5V header -> 5V D1 mini (rail verified: 4.99V)
+# MANDATORY: 1 kOhm resistor between D8 and GND (GPIO15 is a boot strap pin:
+# must be low at power-up; the shifter channel's pull-up would otherwise
+# float it high).
+# The original WiFi module must be REMOVED before connecting the ESP (only
+# one master allowed on the bus).
 #
 # friendly_name determines the HA entity_id: "Fancoil 1" -> climate.fancoil_1
 
@@ -26,17 +29,17 @@ substitutions:
   name: fancoil-1
   friendly_name: Fancoil 1
 
-  # --- Sensore di riferimento esterno (opzionale, si veda blocco piu' sotto) ---
-  # Il sensore di bordo del fancoil sta a ~10cm da terra e non rappresenta bene
-  # la temperatura reale della stanza. Se hai un termometro esterno gia'
-  # disponibile in Home Assistant (Zigbee, WiFi, qualsiasi integrazione), puoi
-  # usarlo come riferimento: il climate mostrera' la sua lettura come
-  # temperatura corrente, e il setpoint scritto sulla scheda madre verra'
-  # corretto dinamicamente per far girare il fancoil finche' la stanza (non il
-  # sensore di bordo) non raggiunge il target.
-  reference_temperature_entity: sensor.termometro_soggiorno
-  reference_temperature_timeout: 60min  # oltre questa soglia il sensore e' considerato "non disponibile"
-  reference_temperature_deadband: "0.3"  # scarto sotto il quale non si applica correzione (evita oscillazioni)
+  # --- External reference sensor (optional, see block further down) --------
+  # The fancoil's on-board sensor sits ~10cm off the floor and doesn't
+  # represent the actual room temperature well. If you already have an
+  # external thermometer available in Home Assistant (Zigbee, WiFi, any
+  # integration), you can use it as a reference: the climate will show its
+  # reading as the current temperature, and the setpoint written to the
+  # mainboard will be dynamically corrected to keep the fancoil running until
+  # the room (not the on-board sensor) reaches the target.
+  reference_temperature_entity: sensor.living_room_thermometer
+  reference_temperature_timeout: 60min  # beyond this, the sensor is considered "unavailable"
+  reference_temperature_deadband: "0.3"  # error below which no correction is applied (avoids oscillation)
 
 esphome:
   name: ${name}
@@ -45,7 +48,7 @@ esphome:
 esp8266:
   board: d1_mini
 
-# Logger seriale disabilitato: UART0 (in swap su GPIO15/13) e' dedicata al Modbus.
+# Serial logger disabled: UART0 (in swap mode on GPIO15/13) is dedicated to Modbus.
 logger:
   baud_rate: 0
 
@@ -78,11 +81,11 @@ external_components:
       type: local
       path: components
 
-# UART0 hardware in modalita' swap: GPIO15=TX (pin D8), GPIO13=RX (pin D7).
-# Niente CH340 di mezzo (i pin GPIO1/GPIO3 del D1 mini sono inutilizzabili per
-# ricevere da dispositivi esterni: il convertitore USB di bordo carica la linea).
-# Bonus: il garbage del bootloader a 74880 baud esce solo su GPIO1: la scheda
-# madre non lo vede.
+# UART0 hardware in swap mode: GPIO15=TX (pin D8), GPIO13=RX (pin D7).
+# No CH340 in the way (the D1 mini's GPIO1/GPIO3 pins can't receive from
+# external devices: the on-board USB converter loads the line).
+# Bonus: the 74880 baud bootloader garbage only comes out on GPIO1, so the
+# mainboard never sees it.
 uart:
   id: uart_bus
   tx_pin: GPIO15
@@ -93,12 +96,12 @@ uart:
 modbus:
   uart_id: uart_bus
 
-# --- Sensore di riferimento esterno (opzionale) ---------------------------
-# Decommenta questo blocco e la sezione "reference_temperature_*" qui sotto
-# nel platform "climate" per usare un termometro esterno di Home Assistant
-# (qualsiasi integrazione: Zigbee2MQTT, ZHA, WiFi, ecc.) al posto del sensore
-# di bordo. Non serve altro: il componente si aggancia gia' alla connessione
-# "api:" definita sopra, niente MQTT o credenziali aggiuntive.
+# --- External reference sensor (optional) ----------------------------------
+# Uncomment this block and the "reference_temperature_*" section below in the
+# "climate" platform to use a Home Assistant thermometer entity (any
+# integration: Zigbee2MQTT, ZHA, WiFi, etc.) instead of the on-board sensor.
+# Nothing else needed: the component already hooks into the "api:" connection
+# defined above, no MQTT or extra credentials required.
 #
 # sensor:
 #   - platform: homeassistant
@@ -107,30 +110,30 @@ modbus:
 
 climate:
   - platform: innova_osmo
-    name: ""              # entita' climate principale: prende il friendly_name
-    address: 1            # slave address della scheda madre (verificato: 1)
+    name: ""              # main climate entity: takes friendly_name
+    address: 1            # mainboard slave address (verified: 1)
     update_interval: 10s
 
     air_temperature:
-      name: Temperatura
+      name: Temperature
 
     water_temperature:
-      name: Temperatura acqua
+      name: Water temperature
 
     fan_speed_percent:
-      name: Ventola
+      name: Fan
 
     water_alarm:
-      name: Allarme acqua
+      name: Water alarm
 
-    # Valore grezzo del registro status (151): utile per scoprire altri bit
-    # di allarme. Rimuovilo quando non serve piu'.
+    # Raw value of the status register (151): useful for discovering other
+    # alarm bits. Remove it once you no longer need it.
     status_raw:
       name: Status raw
 
-    # Da decommentare insieme al blocco "sensor: platform: homeassistant" sopra.
+    # Uncomment together with the "sensor: platform: homeassistant" block above.
     # reference_temperature_sensor: reference_temperature
     # reference_temperature_timeout: ${reference_temperature_timeout}
     # reference_temperature_deadband: ${reference_temperature_deadband}
     # reference_temperature_problem:
-    #   name: Termometro esterno non disponibile
+    #   name: External thermometer unavailable

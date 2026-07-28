@@ -1,21 +1,20 @@
-# Sniffer passivo per schede Innova diverse dall'OSMO (es. controller
-# multi-zona) — non trasmette MAI sul bus: nessun modbus:/climate:
-# configurato, solo logging dei byte ricevuti.
+# Passive sniffer for Innova boards other than the OSMO (e.g. multi-zone
+# controllers) — NEVER transmits on the bus: no modbus:/climate: configured,
+# just logging of received bytes.
 #
-# Perche' serve: la mappa registri in components/innova_osmo e' stata
-# reverse-engineered sulla scheda ESE845II/INNOVA-M7-V0_3 (OSMO monozona).
-# Schede diverse (es. multi-zona) possono usare la stessa mappa o una
-# diversa: questo firmware + tools/wizard.py servono a scoprirlo SENZA
-# rimuovere il modulo WiFi/cloud originale ne' i termostati collegati,
-# perche' l'ESP resta passivo (solo RX) e non c'e' conflitto di master
-# sul bus.
+# Why this exists: the register map in components/innova_osmo was
+# reverse-engineered on the ESE845II/INNOVA-M7-V0_3 board (single-zone OSMO).
+# Other boards (e.g. multi-zone) may share the same map or use a different
+# one: this firmware + tools/wizard.py let you find out WITHOUT removing the
+# original WiFi/cloud module or any wired thermostats, because the ESP stays
+# passive (RX only) and there's no master conflict on the bus.
 #
-# Wiring: identico al fancoil OSMO, vedi README.md (level shifter
-# obbligatorio, bus in dominio 5V, occhio al pin EN). Qui l'ESP non
-# trasmette comandi quindi in teoria la linea TX/D8 non serve, ma tenerla
-# collegata com'e' non crea problemi (nessun modbus master = nessun invio).
+# Wiring: identical to the OSMO fancoil, see README.md (level shifter
+# mandatory, bus in the 5V domain, watch out for the EN pin). Here the ESP
+# never transmits commands so in theory the TX/D8 line isn't needed, but
+# leaving it wired as-is causes no issues (no Modbus master = nothing sent).
 #
-# Uso: vedi tools/wizard.py.
+# Usage: see tools/wizard.py.
 
 substitutions:
   name: innova-sniffer
@@ -26,8 +25,8 @@ esphome:
 esp8266:
   board: d1_mini
 
-# Logger seriale disabilitato: UART0 (in swap su GPIO15/13) e' dedicata
-# allo sniffing. I log arrivano via WiFi/API (vedi tools/wizard.py).
+# Serial logger disabled: UART0 (in swap mode on GPIO15/13) is dedicated to
+# sniffing. Logs arrive via WiFi/API (see tools/wizard.py).
 logger:
   baud_rate: 0
 
@@ -50,8 +49,8 @@ wifi:
 
 captive_portal:
 
-# UART0 hardware in modalita' swap: GPIO15=TX (pin D8, non usato), GPIO13=RX
-# (pin D7, collegato tramite level shifter alla TX della scheda madre).
+# UART0 hardware in swap mode: GPIO15=TX (pin D8, unused), GPIO13=RX (pin D7,
+# connected through the level shifter to the mainboard's TX).
 uart:
   id: uart_bus
   tx_pin: GPIO15
