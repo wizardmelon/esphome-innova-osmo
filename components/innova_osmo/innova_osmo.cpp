@@ -27,8 +27,10 @@ void InnovaOsmo::setup() {
   this->target_temp_pref_ =
       global_preferences->make_preference<float>(fnv1_hash("innova_osmo_target_temp") ^ this->get_object_id_hash());
   float loaded_target;
-  if (this->target_temp_pref_.load(&loaded_target))
+  if (this->target_temp_pref_.load(&loaded_target)) {
     this->target_temperature = loaded_target;
+    this->target_temperature_known_ = true;
+  }
 
   this->reference_temperature_sensor_->add_on_state_callback([this](float state) {
     if (std::isnan(state))
@@ -89,10 +91,22 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
       // Con compensazione attiva il registro puo' contenere W (calcolato da noi)
       // invece di X: in quel caso il target reale vive solo in target_temperature
       // (persistito su flash in setup()) e non va risincronizzato da qui.
-      if (this->reference_temperature_sensor_ == nullptr) {
+      //
+      // Eccezione: primissimo avvio con la compensazione appena abilitata, senza
+      // ancora nessuna preference salvata. In quel momento 305 contiene ancora
+      // l'ultimo X reale (nessuna scrittura compensata e' mai partita), quindi
+      // e' l'unica occasione per recuperarlo invece di restare con target NAN
+      // (altrimenti climate non avrebbe un target impostabile finche' l'utente
+      // non chiama target_temperature da HA "alla cieca").
+      if (this->reference_temperature_sensor_ == nullptr || !this->target_temperature_known_) {
         // A unita' OFF il cloud puo' lasciare la sentinella 255: non e' un setpoint.
-        if (value != SETPOINT_OFF_SENTINEL)
+        if (value != SETPOINT_OFF_SENTINEL) {
           this->target_temperature = f_value;
+          if (this->reference_temperature_sensor_ != nullptr) {
+            this->target_temperature_known_ = true;
+            this->target_temp_pref_.save(&this->target_temperature);
+          }
+        }
       }
       break;
     case 3:  // REG_PROGRAM
@@ -235,8 +249,10 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value()) {
     float target = *call.get_target_temperature();
     this->target_temperature = target;
-    if (this->reference_temperature_sensor_ != nullptr)
+    if (this->reference_temperature_sensor_ != nullptr) {
+      this->target_temperature_known_ = true;
       this->target_temp_pref_.save(&target);
+    }
     // Scrittura immediata per reattivita': se la compensazione e' attiva verra'
     // raffinata al giro di polling successivo (update_setpoint_compensation_).
     add_to_queue(CMD_WRITE_REG, uint16_t(target * 10.0f + 0.5f), REG_SETPOINT);

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.3.3 — 2026-07-28
+
+**Fix: climate stuck with no adjustable target on first activation of the
+external reference sensor.** With `reference_temperature_sensor` configured,
+`target_temperature` starts as `NAN` until a flash preference exists (see
+v0.3.0), and register 305 readback is intentionally ignored so it doesn't
+get overwritten by a compensated value. On a brand-new activation neither
+had happened yet: no preference, and the register read that could have
+bootstrapped one was skipped — leaving `target_temperature` at `NAN`
+indefinitely, with no target for the HA climate card to show or let you
+drag (confirmed live on fancoil-sala: card showed current temperature only,
+no way to set a target).
+
+Fix: on first boot with the feature enabled and no preference yet, register
+305 is read *once* — at that point it still holds the real last-set target,
+since no compensated write has happened yet — to seed `target_temperature`,
+which is then immediately persisted. After that one-time bootstrap, register
+305 is ignored again as before.
+
+No config changes needed; existing installs with a reference sensor already
+configured for more than one boot cycle are unaffected (they already have a
+preference).
+
 ## v0.3.2 — 2026-07-28
 
 **Fix deprecation warning:** `modbus.register_modbus_device` is deprecated

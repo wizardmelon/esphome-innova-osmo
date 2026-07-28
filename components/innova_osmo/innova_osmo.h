@@ -145,6 +145,7 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
   bool reference_temperature_valid_{false};        // fresco e disponibile
   uint16_t last_written_setpoint_raw_{0xFFFF};      // per evitare scritture ridondanti
   ESPPreferenceObject target_temp_pref_;            // X sopravvive al reboot quando 305 contiene W
+  bool target_temperature_known_{false};            // vedi bootstrap in setup()/on_modbus_data()
 };
 
 }  // namespace innova_osmo
