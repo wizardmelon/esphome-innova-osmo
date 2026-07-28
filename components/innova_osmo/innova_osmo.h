@@ -18,6 +18,8 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/preferences.h"
+#include <cmath>
 #include <deque>
 
 namespace esphome {
@@ -48,6 +50,18 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
   void set_air_temperature_sensor(sensor::Sensor *s) { air_temperature_sensor_ = s; }
   void set_status_raw_sensor(sensor::Sensor *s) { status_raw_sensor_ = s; }
   void set_water_alarm_sensor(binary_sensor::BinarySensor *s) { water_alarm_sensor_ = s; }
+
+  // Sensore esterno di riferimento (es. importato da Home Assistant) usato al
+  // posto del sensore di bordo (posizionato a 10cm da terra, poco rappresentativo
+  // della stanza) per la temperatura corrente e per compensare il setpoint
+  // scritto sulla scheda madre. Del tutto opzionale: se non impostato il
+  // comportamento e' identico a prima.
+  void set_reference_temperature_sensor(sensor::Sensor *s) { reference_temperature_sensor_ = s; }
+  void set_reference_temperature_problem_sensor(binary_sensor::BinarySensor *s) {
+    reference_temperature_problem_sensor_ = s;
+  }
+  void set_reference_temperature_timeout(uint32_t ms) { reference_temperature_timeout_ms_ = ms; }
+  void set_reference_temperature_deadband(float deadband) { reference_temperature_deadband_ = deadband; }
 
   void setup() override;
   void loop() override;
@@ -89,9 +103,25 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
 
   void control(const climate::ClimateCall &call) override;
 
+  void update_reference_temperature_status_();
+  void update_setpoint_compensation_();
+
   sensor::Sensor *air_temperature_sensor_{nullptr};
   sensor::Sensor *status_raw_sensor_{nullptr};
   binary_sensor::BinarySensor *water_alarm_sensor_{nullptr};
+
+  // Compensazione via sensore esterno (opzionale, si veda README/protocol.md).
+  sensor::Sensor *reference_temperature_sensor_{nullptr};
+  binary_sensor::BinarySensor *reference_temperature_problem_sensor_{nullptr};
+  float reference_temperature_{NAN};              // Z, ultimo valore ricevuto
+  float internal_air_temperature_{NAN};            // Y, sensore di bordo
+  float reference_temperature_deadband_{0.3f};     // "a": soglia sotto la quale non si corregge
+  uint32_t reference_temperature_timeout_ms_{60UL * 60UL * 1000UL};
+  uint32_t reference_temperature_last_update_{0};
+  bool has_reference_data_{false};
+  bool reference_temperature_valid_{false};        // fresco e disponibile
+  uint16_t last_written_setpoint_raw_{0xFFFF};      // per evitare scritture ridondanti
+  ESPPreferenceObject target_temp_pref_;            // X sopravvive al reboot quando 305 contiene W
 };
 
 }  // namespace innova_osmo

@@ -43,7 +43,7 @@ The link between mainboard (slave, address 1) and WiFi module (master) is
 |----------|---------|--------|--------|
 | 0 | Room temperature ×10 | RO | e.g. 259 = 25.9 °C |
 | 151 | Status/alarms bitfield | RO | bit9 = water temperature out of range |
-| 305 | Setpoint ×10 | R/W | 255 = sentinel written by cloud while OFF |
+| 305 | Setpoint ×10 | R/W | 255 = sentinel written by cloud while OFF. When the optional external reference sensor (see below) is enabled, this component writes a compensated value here instead of the raw HA target — see [External reference sensor](#external-reference-sensor-optional). |
 | 553 | Program bitfield | R/W | bits 0-2: fan 0=auto 1=night 2=max; bit4 = standby |
 | 556 | Season | R/W | 0=auto, 1=heating, 2=cooling |
 
@@ -137,6 +137,35 @@ STL/design files will be added to this repository once finalized.
 3. Flash, wire, done. You get a full `climate` entity (off/heat/cool/auto,
    fan auto/night/max, setpoint 16-30 °C), a room temperature sensor, a
    "water out of range" problem binary sensor, and a diagnostic raw status value.
+
+## External reference sensor (optional)
+
+The fancoil's on-board sensor sits ~10 cm off the floor, which reads colder or
+hotter than the actual room depending on airflow and season. If you already
+have a thermometer entity in Home Assistant (any integration — Zigbee2MQTT,
+ZHA, WiFi, whatever), you can point the climate at it instead:
+
+- `current_temperature` is taken from the external sensor (falling back to the
+  on-board one if the external sensor goes stale).
+- The setpoint written to register 305 is dynamically compensated so the
+  fancoil keeps running, using its own sensor as reference, until the *real*
+  room — not its own sensor — reaches the target you set in HA. A deadband
+  (`reference_temperature_deadband`, default 0.3 °C) prevents the correction
+  from flip-flopping direction near convergence due to sensor noise, and a
+  0.5 °C minimum margin keeps decent airflow even a fraction of a degree from
+  target.
+- A diagnostic `problem` binary sensor flips on when the external sensor
+  hasn't reported within `reference_temperature_timeout` (default 60 min —
+  generous enough for battery Zigbee sensors that only report hourly, but far
+  short of a full day of staleness). While stale, the component falls back to
+  writing your target directly (no compensation), same as when the feature
+  isn't configured at all.
+
+See the commented-out block in `example-fancoil.yaml` (`sensor: platform:
+homeassistant` + the `reference_temperature_*` keys under `climate:`) —
+uncomment it and set `entity_id` to your thermometer to enable it. Uses the
+device's existing `api:` connection to Home Assistant, no MQTT or extra
+credentials needed.
 
 ## Reverse-engineering toolkit
 

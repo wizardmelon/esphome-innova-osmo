@@ -26,6 +26,18 @@ substitutions:
   name: fancoil-1
   friendly_name: Fancoil 1
 
+  # --- Sensore di riferimento esterno (opzionale, si veda blocco piu' sotto) ---
+  # Il sensore di bordo del fancoil sta a ~10cm da terra e non rappresenta bene
+  # la temperatura reale della stanza. Se hai un termometro esterno gia'
+  # disponibile in Home Assistant (Zigbee, WiFi, qualsiasi integrazione), puoi
+  # usarlo come riferimento: il climate mostrera' la sua lettura come
+  # temperatura corrente, e il setpoint scritto sulla scheda madre verra'
+  # corretto dinamicamente per far girare il fancoil finche' la stanza (non il
+  # sensore di bordo) non raggiunge il target.
+  reference_temperature_entity: sensor.termometro_soggiorno
+  reference_temperature_timeout: 60min  # oltre questa soglia il sensore e' considerato "non disponibile"
+  reference_temperature_deadband: "0.3"  # scarto sotto il quale non si applica correzione (evita oscillazioni)
+
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
@@ -81,6 +93,18 @@ uart:
 modbus:
   uart_id: uart_bus
 
+# --- Sensore di riferimento esterno (opzionale) ---------------------------
+# Decommenta questo blocco e la sezione "reference_temperature_*" qui sotto
+# nel platform "climate" per usare un termometro esterno di Home Assistant
+# (qualsiasi integrazione: Zigbee2MQTT, ZHA, WiFi, ecc.) al posto del sensore
+# di bordo. Non serve altro: il componente si aggancia gia' alla connessione
+# "api:" definita sopra, niente MQTT o credenziali aggiuntive.
+#
+# sensor:
+#   - platform: homeassistant
+#     id: reference_temperature
+#     entity_id: ${reference_temperature_entity}
+
 climate:
   - platform: innova_osmo
     name: ""              # entita' climate principale: prende il friendly_name
@@ -97,3 +121,10 @@ climate:
     # di allarme. Rimuovilo quando non serve piu'.
     status_raw:
       name: Status raw
+
+    # Da decommentare insieme al blocco "sensor: platform: homeassistant" sopra.
+    # reference_temperature_sensor: reference_temperature
+    # reference_temperature_timeout: ${reference_temperature_timeout}
+    # reference_temperature_deadband: ${reference_temperature_deadband}
+    # reference_temperature_problem:
+    #   name: Termometro esterno non disponibile
