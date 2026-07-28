@@ -24,8 +24,21 @@ CONF_WATER_TEMPERATURE = "water_temperature"
 CONF_FAN_SPEED_PERCENT = "fan_speed_percent"
 CONF_WATER_ALARM = "water_alarm"
 CONF_STATUS_RAW = "status_raw"
+CONF_REFERENCE_TEMPERATURE_SENSOR = "reference_temperature_sensor"
+CONF_REFERENCE_TEMPERATURE_TIMEOUT = "reference_temperature_timeout"
+CONF_REFERENCE_TEMPERATURE_DEADBAND = "reference_temperature_deadband"
+CONF_REFERENCE_TEMPERATURE_PROBLEM = "reference_temperature_problem"
 
-CONFIG_SCHEMA = (
+
+def _validate_reference_temperature(config):
+    if CONF_REFERENCE_TEMPERATURE_PROBLEM in config and CONF_REFERENCE_TEMPERATURE_SENSOR not in config:
+        raise cv.Invalid(
+            f"'{CONF_REFERENCE_TEMPERATURE_PROBLEM}' richiede '{CONF_REFERENCE_TEMPERATURE_SENSOR}'"
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
     climate.climate_schema(InnovaOsmo)
     .extend(
         {
@@ -54,10 +67,26 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=0,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
+            # Sensore esterno opzionale (es. importato da Home Assistant via
+            # "platform: homeassistant") usato al posto del sensore di bordo per
+            # la temperatura corrente e per compensare il setpoint scritto sulla
+            # scheda madre. Si veda README.md per i dettagli.
+            cv.Optional(CONF_REFERENCE_TEMPERATURE_SENSOR): cv.use_id(sensor.Sensor),
+            cv.Optional(
+                CONF_REFERENCE_TEMPERATURE_TIMEOUT, default="60min"
+            ): cv.positive_time_period_minutes,
+            cv.Optional(CONF_REFERENCE_TEMPERATURE_DEADBAND, default=0.3): cv.float_range(
+                min=0.0, max=5.0
+            ),
+            cv.Optional(CONF_REFERENCE_TEMPERATURE_PROBLEM): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_PROBLEM,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
         }
     )
     .extend(cv.polling_component_schema("30s"))
-    .extend(modbus.modbus_device_schema(0x01))
+    .extend(modbus.modbus_device_schema(0x01)),
+    _validate_reference_temperature,
 )
 
 
@@ -81,3 +110,15 @@ async def to_code(config):
     if CONF_STATUS_RAW in config:
         sens = await sensor.new_sensor(config[CONF_STATUS_RAW])
         cg.add(var.set_status_raw_sensor(sens))
+    if CONF_REFERENCE_TEMPERATURE_SENSOR in config:
+        sens = await cg.get_variable(config[CONF_REFERENCE_TEMPERATURE_SENSOR])
+        cg.add(var.set_reference_temperature_sensor(sens))
+        cg.add(
+            var.set_reference_temperature_timeout(
+                config[CONF_REFERENCE_TEMPERATURE_TIMEOUT].total_milliseconds
+            )
+        )
+        cg.add(var.set_reference_temperature_deadband(config[CONF_REFERENCE_TEMPERATURE_DEADBAND]))
+    if CONF_REFERENCE_TEMPERATURE_PROBLEM in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_REFERENCE_TEMPERATURE_PROBLEM])
+        cg.add(var.set_reference_temperature_problem_sensor(sens))

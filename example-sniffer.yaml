@@ -1,0 +1,73 @@
+# Sniffer passivo per schede Innova diverse dall'OSMO (es. controller
+# multi-zona) — non trasmette MAI sul bus: nessun modbus:/climate:
+# configurato, solo logging dei byte ricevuti.
+#
+# Perche' serve: la mappa registri in components/innova_osmo e' stata
+# reverse-engineered sulla scheda ESE845II/INNOVA-M7-V0_3 (OSMO monozona).
+# Schede diverse (es. multi-zona) possono usare la stessa mappa o una
+# diversa: questo firmware + tools/wizard.py servono a scoprirlo SENZA
+# rimuovere il modulo WiFi/cloud originale ne' i termostati collegati,
+# perche' l'ESP resta passivo (solo RX) e non c'e' conflitto di master
+# sul bus.
+#
+# Wiring: identico al fancoil OSMO, vedi README.md (level shifter
+# obbligatorio, bus in dominio 5V, occhio al pin EN). Qui l'ESP non
+# trasmette comandi quindi in teoria la linea TX/D8 non serve, ma tenerla
+# collegata com'e' non crea problemi (nessun modbus master = nessun invio).
+#
+# Uso: vedi tools/wizard.py.
+
+substitutions:
+  name: innova-sniffer
+
+esphome:
+  name: ${name}
+
+esp8266:
+  board: d1_mini
+
+# Logger seriale disabilitato: UART0 (in swap su GPIO15/13) e' dedicata
+# allo sniffing. I log arrivano via WiFi/API (vedi tools/wizard.py).
+logger:
+  baud_rate: 0
+
+api:
+  encryption:
+    key: !secret fancoil_api_key
+
+ota:
+  - platform: esphome
+    password: !secret fancoil_ota_password
+
+wifi:
+  power_save_mode: none
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+  ap:
+    ssid: "${name} Fallback"
+    password: !secret wifi_password
+
+captive_portal:
+
+# UART0 hardware in modalita' swap: GPIO15=TX (pin D8, non usato), GPIO13=RX
+# (pin D7, collegato tramite level shifter alla TX della scheda madre).
+uart:
+  id: uart_bus
+  tx_pin: GPIO15
+  rx_pin: GPIO13
+  baud_rate: 9600
+  stop_bits: 1
+  debug:
+    direction: RX
+    after:
+      timeout: 20ms
+    sequence:
+      - lambda: |-
+          std::string hex;
+          char buf[4];
+          for (auto b : bytes) {
+            sprintf(buf, "%02X ", b);
+            hex += buf;
+          }
+          ESP_LOGD("sniff", "RX %s", hex.c_str());

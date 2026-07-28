@@ -99,6 +99,10 @@ producing chilled water at the time).
   stock master never polled one). The `climate` action is therefore reported as
   off/idle only. Candidates to probe: AirLeaf used reg 15 for fan speed — the
   OSMO map is different, but a register scan from the ESP master could map more.
+- Our own component, when the optional external reference sensor is enabled
+  (see README), writes a *compensated* value to 305 instead of the raw HA
+  target — don't assume 305 == the user-visible setpoint if you're capturing
+  traffic from an ESP running this component in that mode.
 
 ## Unexplored
 

@@ -13,7 +13,36 @@ static const uint16_t POLL_REGISTERS[] = {REG_AIR_TEMP,  REG_SETPOINT, REG_PROGR
                                            REG_STATUS,    REG_WATER_TEMP, REG_FAN_SPEED};
 static const int POLL_STATES = sizeof(POLL_REGISTERS) / sizeof(POLL_REGISTERS[0]);
 
-void InnovaOsmo::setup() {}
+void InnovaOsmo::setup() {
+  if (this->reference_temperature_sensor_ == nullptr)
+    return;
+
+  // X (target reale) deve sopravvivere al reboot: una volta attiva la
+  // compensazione, il registro 305 puo' contenere W (compensato) invece di X,
+  // quindi non possiamo piu' ricavare X rileggendolo all'avvio.
+  // Di default NAN: se non c'e' ancora una preference salvata (primo avvio in
+  // assoluto) update_setpoint_compensation_() deve poter riconoscerlo ed
+  // astenersi dallo scrivere finche' l'utente non imposta un target da HA.
+  this->target_temperature = NAN;
+  this->target_temp_pref_ =
+      global_preferences->make_preference<float>(fnv1_hash("innova_osmo_target_temp") ^ this->get_object_id_hash());
+  float loaded_target;
+  if (this->target_temp_pref_.load(&loaded_target))
+    this->target_temperature = loaded_target;
+
+  this->reference_temperature_sensor_->add_on_state_callback([this](float state) {
+    if (std::isnan(state))
+      return;
+    this->reference_temperature_ = state;
+    this->reference_temperature_last_update_ = millis();
+    this->has_reference_data_ = true;
+  });
+  if (this->reference_temperature_sensor_->has_state() && !std::isnan(this->reference_temperature_sensor_->state)) {
+    this->reference_temperature_ = this->reference_temperature_sensor_->state;
+    this->reference_temperature_last_update_ = millis();
+    this->has_reference_data_ = true;
+  }
+}
 
 void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
   this->waiting_ = false;
@@ -37,16 +66,34 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
   uint16_t value = (uint16_t(data[0]) << 8) | uint16_t(data[1]);
   float f_value = value / 10.0f;
 
+  // Dump temporaneo per confronto incrociato registri vs stato reale del fancoil.
+  // Rimuovere una volta identificato il bit di feedback attivo/idle.
+  ESP_LOGD(TAG, "poll state=%d reg=%u raw=%u (0x%04X)", this->state_,
+           POLL_REGISTERS[this->state_ - 1], value, value);
+
   switch (this->state_) {
     case 1:  // REG_AIR_TEMP
-      this->current_temperature = f_value;
+      this->internal_air_temperature_ = f_value;
       if (this->air_temperature_sensor_ != nullptr)
         this->air_temperature_sensor_->publish_state(f_value);
+
+      if (this->reference_temperature_sensor_ != nullptr) {
+        this->update_reference_temperature_status_();
+        this->current_temperature = this->reference_temperature_valid_ ? this->reference_temperature_ : f_value;
+        this->update_setpoint_compensation_();
+      } else {
+        this->current_temperature = f_value;
+      }
       break;
     case 2:  // REG_SETPOINT
-      // A unita' OFF il cloud puo' lasciare la sentinella 255: non e' un setpoint.
-      if (value != SETPOINT_OFF_SENTINEL)
-        this->target_temperature = f_value;
+      // Con compensazione attiva il registro puo' contenere W (calcolato da noi)
+      // invece di X: in quel caso il target reale vive solo in target_temperature
+      // (persistito su flash in setup()) e non va risincronizzato da qui.
+      if (this->reference_temperature_sensor_ == nullptr) {
+        // A unita' OFF il cloud puo' lasciare la sentinella 255: non e' un setpoint.
+        if (value != SETPOINT_OFF_SENTINEL)
+          this->target_temperature = f_value;
+      }
       break;
     case 3:  // REG_PROGRAM
       this->program_ = value;
@@ -188,10 +235,71 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value()) {
     float target = *call.get_target_temperature();
     this->target_temperature = target;
+    if (this->reference_temperature_sensor_ != nullptr)
+      this->target_temp_pref_.save(&target);
+    // Scrittura immediata per reattivita': se la compensazione e' attiva verra'
+    // raffinata al giro di polling successivo (update_setpoint_compensation_).
     add_to_queue(CMD_WRITE_REG, uint16_t(target * 10.0f + 0.5f), REG_SETPOINT);
   }
 
   this->state_ = 1;  // riallinea subito lo stato dopo i comandi
+}
+
+void InnovaOsmo::update_reference_temperature_status_() {
+  bool fresh = this->has_reference_data_ &&
+               (millis() - this->reference_temperature_last_update_ <= this->reference_temperature_timeout_ms_);
+  this->reference_temperature_valid_ = fresh;
+  if (this->reference_temperature_problem_sensor_ != nullptr)
+    this->reference_temperature_problem_sensor_->publish_state(!fresh);
+}
+
+// Ricalcola il setpoint da scrivere sul registro 305 (W) per compensare la
+// posizione del sensore di bordo, usando il sensore esterno come riferimento
+// reale della stanza. X (target utente) resta invariato e viene esposto in HA;
+// W e' un dettaglio implementativo scritto sull'hardware, mai mostrato.
+//
+//   g = Z - X (con segno)
+//   se |g| <= a (deadband): nessuna correzione, W = Y
+//   altrimenti: margine = max(0.25*|g|, 0.5), W = Y - segno(g) * (|g| + margine)
+//
+// Senza dato fresco dal sensore esterno si torna a scrivere X direttamente
+// (comportamento identico a quando la funzione non e' configurata).
+void InnovaOsmo::update_setpoint_compensation_() {
+  if (std::isnan(this->target_temperature))
+    return;  // target non ancora noto (primo avvio, prima di un set point da HA)
+
+  float x = this->target_temperature;
+  float w;
+
+  if (!this->reference_temperature_valid_) {
+    w = x;
+  } else {
+    float y = this->internal_air_temperature_;
+    float g = this->reference_temperature_ - x;
+    float abs_g = fabsf(g);
+    if (abs_g <= this->reference_temperature_deadband_) {
+      w = y;
+    } else {
+      float sign = (g > 0) ? 1.0f : -1.0f;
+      float margin = 0.25f * abs_g;
+      if (margin < 0.5f)
+        margin = 0.5f;
+      w = y - sign * (abs_g + margin);
+    }
+  }
+
+  // Limite di sicurezza sul range fisico del fancoil.
+  if (w < 16.0f) w = 16.0f;
+  if (w > 30.0f) w = 30.0f;
+
+  uint16_t raw = uint16_t(w * 10.0f + 0.5f);
+  if (raw == SETPOINT_OFF_SENTINEL)
+    raw += 1;  // evita la sentinella "unita' OFF" (25.5 -> 25.6)
+
+  if (raw != this->last_written_setpoint_raw_) {
+    add_to_queue(CMD_WRITE_REG, raw, REG_SETPOINT);
+    this->last_written_setpoint_raw_ = raw;
+  }
 }
 
 void InnovaOsmo::dump_config() {
