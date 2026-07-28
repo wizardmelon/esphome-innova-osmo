@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.3.0 — 2026-07-28
+
+**Added: optional external reference sensor for compensated setpoint control.**
+The fancoil's on-board sensor sits ~10 cm off the floor and doesn't represent
+the actual room temperature well. You can now point the climate at an
+existing Home Assistant thermometer entity (any integration) instead:
+
+- `current_temperature` is taken from the external sensor, falling back to
+  the on-board one if it goes stale.
+- The setpoint written to register 305 is dynamically compensated — using
+  the on-board sensor as reference — so the fancoil keeps running until the
+  *real* room, not its own sensor, reaches the HA-set target. A configurable
+  deadband (default 0.3 °C) avoids the correction flip-flopping direction
+  from sensor noise near convergence, with a 0.5 °C minimum margin to keep
+  decent airflow close to target.
+- A diagnostic `problem` binary sensor flags when the external sensor hasn't
+  reported within a configurable timeout (default 60 min); while stale, the
+  component writes the target directly with no compensation.
+- The user-facing target temperature is persisted to flash, since register
+  305 may now hold the compensated value instead of it.
+
+Entirely optional — without configuring `reference_temperature_sensor`,
+behavior is unchanged. See the commented-out block in `example-fancoil.yaml`
+and the "External reference sensor" section in README.md.
+
 ## v0.2.0 — 2026-07-17
 
 **Fix: `climate.action` was always reported as idle**, even while the unit was
