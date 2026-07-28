@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.2 — 2026-07-28
+
+**Fix deprecation warning:** `modbus.register_modbus_device` is deprecated
+upstream (ESPHome will remove it in 2026.12.0) in favor of
+`register_modbus_client_device` — same behavior, just a rename. Switched
+`climate.py` over. No config changes needed on existing fancoils.
+
 ## v0.3.1 — 2026-07-28
 
 **Expose tenth-of-a-degree setpoint resolution.** Register 305 is already

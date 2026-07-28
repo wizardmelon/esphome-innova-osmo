@@ -93,7 +93,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = await climate.new_climate(config)
     await cg.register_component(var, config)
-    await modbus.register_modbus_device(var, config)
+    await modbus.register_modbus_client_device(var, config)
 
     if CONF_AIR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_AIR_TEMPERATURE])
