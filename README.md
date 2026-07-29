@@ -127,9 +127,9 @@ Plus the 1 kΩ from D8 to GND.
 **Remove the original WiFi module first** — one master only on the bus. Keep it
 in a drawer: the swap is fully reversible.
 
-## Carrier board (coming soon)
+## Carrier board
 
-A dedicated carrier board is in the works — not a PCB from a fab house, but a
+A dedicated carrier board is available — not a PCB from a fab house, but a
 **3D-printed one**: the board is printed in PLA with the traces as raised
 ridges, self-adhesive copper tape is then laid over the ridges, and the
 components are soldered directly onto the copper. A cheap, fast way to get a
@@ -140,10 +140,15 @@ just interconnections.
 The board hosts:
 - headers for the D1 mini
 - the 4-channel level shifter module
+- a pad for the GPIO15 boot pull-down resistor (1 kΩ)
 - a 4-pin header for the final connection to the fancoil (5V, GND, TX, RX)
-- two holes for the GPIO15 boot pull-down resistor
 
-STL/design files will be added to this repository once finalized.
+STL, print profile (0.2 mm nozzle, 0.1 mm layer height, PLA, no supports) and
+an assembly guide PDF are published on MakerWorld:
+[Scheda portante D1 mini + traslatore di livello per UART 5V](https://makerworld.com/it/models/3108431-carrier-board-d1-mini-level-shifter-per-uart-5v) (CC BY-NC-SA).
+
+What you need after printing: adhesive copper tape for the ridges, a
+soldering iron, the D1 mini, the level shifter module, and the 1 kΩ resistor.
 
 ## Install
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.5 — 2026-07-29
+
+**Docs: carrier board published.** The 3D-printed carrier board (D1 mini +
+level shifter, copper-tape traces) is no longer "coming soon" — STL, print
+profile and an assembly guide PDF are up on MakerWorld, linked from the
+README's Carrier board section.
+
 ## v0.3.4 — 2026-07-29
 
 **Fix: a mode change and a fan change can silently cancel each other.**
