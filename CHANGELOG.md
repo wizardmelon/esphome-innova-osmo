@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.3.4 — 2026-07-29
+
+**Fix: a mode change and a fan change can silently cancel each other.**
+Register 553 packs two independent fields — fan speed (bits 0-2) and standby
+(bit 4) — so every write to it is a read-modify-write built on `program_`,
+the cached copy of the register. `control()` never refreshed that cache after
+queueing a write; only the poll cycle did (`on_modbus_data()`, state 3). Any
+second write issued before that poll landed rebuilt the word from the stale
+cache and overwrote the first change.
+
+Two ways to hit it:
+
+- **Same `climate.control` call carrying both mode and fan_mode** — no timing
+  involved, fails every time. Turning the unit off while setting the fan to
+  max queues `PROGRAM=16` then `PROGRAM=2`; last write wins, the unit stays
+  on. Reachable from the native API, a script, or a Node-RED flow setting
+  both attributes at once.
+- **Two calls in quick succession.** The exposure window is *not* the 10 s
+  `update_interval`: `control()` ends with `state_ = 1`, restarting the poll
+  burst, and `loop()` drains the write queue before reading registers 1-7
+  with REG_PROGRAM at state 3 — so the cache re-syncs roughly 200-250 ms
+  after the call. Short, but trivially hit by back-to-back automation
+  commands.
+
+Fix: `control()` now assigns `program_` right after queueing each REG_PROGRAM
+write, in both the mode and fan_mode blocks. The unsupported-mode `default:`
+branch deliberately leaves it untouched, since it queues no write. If a write
+fails on the bus the cache is corrected by the next poll, exactly as before.
+
+`season_` is intentionally left alone: REG_SEASON is written wholesale rather
+than read-modify-write, so a stale copy cannot corrupt a later write, and it
+is refreshed (state 4) before its only consumer reads it (state 7).
+
 ## v0.3.3 — 2026-07-28
 
 **Fix: climate stuck with no adjustable target on first activation of the

@@ -209,25 +209,40 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
   if (call.get_mode().has_value()) {
     climate::ClimateMode mode = *call.get_mode();
     this->mode = mode;
+    // 553 e' un registro read-modify-write con due campi indipendenti (fan sui
+    // bit 0-2, standby sul bit 4): ogni scrittura deve partire dal valore
+    // corrente. program_ viene rinfrescato dal poll (case 3), che pero' arriva
+    // centinaia di ms dopo: senza riallineare la copia in RAM qui, una seconda
+    // scrittura ravvicinata (o il blocco fan_mode piu' sotto, nella stessa
+    // chiamata) ripartirebbe dal valore vecchio e cancellerebbe questa modifica.
     uint16_t prg = this->program_;
     switch (mode) {
       case climate::CLIMATE_MODE_OFF:
         // OFF osservato dall'app: scrive program con bit4 alzato (es. 17)
-        add_to_queue(CMD_WRITE_REG, prg | PROGRAM_STANDBY_MASK, REG_PROGRAM);
+        prg |= PROGRAM_STANDBY_MASK;
+        add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+        this->program_ = prg;
         break;
       case climate::CLIMATE_MODE_HEAT:
         add_to_queue(CMD_WRITE_REG, 1, REG_SEASON);
-        add_to_queue(CMD_WRITE_REG, prg & ~PROGRAM_STANDBY_MASK, REG_PROGRAM);
+        prg &= ~PROGRAM_STANDBY_MASK;
+        add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+        this->program_ = prg;
         break;
       case climate::CLIMATE_MODE_COOL:
         add_to_queue(CMD_WRITE_REG, 2, REG_SEASON);
-        add_to_queue(CMD_WRITE_REG, prg & ~PROGRAM_STANDBY_MASK, REG_PROGRAM);
+        prg &= ~PROGRAM_STANDBY_MASK;
+        add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+        this->program_ = prg;
         break;
       case climate::CLIMATE_MODE_HEAT_COOL:
         add_to_queue(CMD_WRITE_REG, 0, REG_SEASON);
-        add_to_queue(CMD_WRITE_REG, prg & ~PROGRAM_STANDBY_MASK, REG_PROGRAM);
+        prg &= ~PROGRAM_STANDBY_MASK;
+        add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+        this->program_ = prg;
         break;
       default:
+        // Nessuna scrittura in coda: program_ NON va toccato.
         ESP_LOGW(TAG, "Modo non supportato: %d", mode);
         break;
     }
@@ -244,6 +259,7 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
       default: break;                                    // auto = 0
     }
     add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+    this->program_ = prg;  // idem: tiene allineata la copia in RAM
   }
 
   if (call.get_target_temperature().has_value()) {
