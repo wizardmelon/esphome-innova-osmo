@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.1 — 2026-11-04
+
+**Fix: the saved target could be lost when reflashing.** With an external
+thermometer configured, the real target `X` is stored in flash because register
+305 holds the compensated value `W`. The storage key included a hash of the
+entity's object id, so adding an `id:` to the climate (or renaming it) changed
+the key; after the next flash the target was "lost" and re-read from register
+305, i.e. `W`, leaving a wrong setpoint. The key is now fixed (one climate per
+device) and the old key is read once as a migration, so the target survives
+the upgrade as well.
+
 ## v0.4.0 — 2026-11-04
 
 **Smarter use of the external thermometer, tunable from Home Assistant.**
