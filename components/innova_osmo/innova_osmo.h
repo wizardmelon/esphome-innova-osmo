@@ -27,6 +27,8 @@
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/number/number.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 #include <cmath>
@@ -83,6 +85,36 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
   }
   void set_reference_temperature_timeout(uint32_t ms) { reference_temperature_timeout_ms_ = ms; }
   void set_reference_temperature_deadband(float deadband) { reference_temperature_deadband_ = deadband; }
+  // Modalita' di compensazione: false = banda +-deadband con salti (storica),
+  // true = correzione proporzionale continua W = X + offset, con offset = T interna - T esterna
+  // (filtrato): la scheda vede l'errore VERO della stanza e la ventola automatica modula di conseguenza.
+  void set_compensation_proportional(bool v) { compensation_proportional_ = v; }
+  void set_reference_offset_filter(float a) { offset_filter_ = a; }
+  // Boost: quando l'errore VERO della stanza (X - Z in riscaldamento, Z - X in raffreddamento) supera
+  // boost_on la ventola va al massimo; torna in automatico sotto boost_off. 0 = disabilitato.
+  void set_boost_on(float v) { boost_on_ = v; }
+  void set_boost_off(float v) { boost_off_ = v; }
+
+  // Parametri modificabili a runtime da Home Assistant (opzionali): se l'entita' non e' collegata vale il
+  // default di configurazione. Il componente legge lo stato dell'entita' a ogni uso, quindi non serve riflashare.
+  void set_use_reference_switch(switch_::Switch *s) { use_reference_switch_ = s; }
+  void set_proportional_switch(switch_::Switch *s) { proportional_switch_ = s; }
+  void set_boost_switch(switch_::Switch *s) { boost_switch_ = s; }
+  void set_boost_on_number(number::Number *n) { boost_on_number_ = n; }
+  void set_boost_hysteresis_number(number::Number *n) { boost_hysteresis_number_ = n; }
+  void set_deadband_number(number::Number *n) { deadband_number_ = n; }
+  void set_offset_filter_number(number::Number *n) { offset_filter_number_ = n; }
+  void set_timeout_number(number::Number *n) { timeout_number_ = n; }
+  // Diagnostica
+  void set_offset_sensor(sensor::Sensor *s) { offset_sensor_ = s; }
+  void set_written_setpoint_sensor(sensor::Sensor *s) { written_setpoint_sensor_ = s; }
+  void set_true_error_sensor(sensor::Sensor *s) { true_error_sensor_ = s; }
+  void set_boost_active_sensor(binary_sensor::BinarySensor *s) { boost_active_sensor_ = s; }
+  // Da un pulsante: riparte la stima dell'offset (es. dopo aver spostato il termometro).
+  void reset_offset() {
+    offset_valid_ = false;
+    fresh_reference_sample_ = true;
+  }
 
   void setup() override;
   void loop() override;
@@ -126,6 +158,16 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
 
   void update_reference_temperature_status_();
   void update_setpoint_compensation_();
+  float compute_proportional_setpoint_(float x);
+  void update_boost_();
+  bool use_reference_() const;
+  bool proportional_() const;
+  bool boost_enabled_() const;
+  float boost_on_value_() const;
+  float boost_off_value_() const;
+  float deadband_value_() const;
+  float offset_filter_value_() const;
+  uint32_t timeout_ms_value_() const;
 
   sensor::Sensor *air_temperature_sensor_{nullptr};
   sensor::Sensor *water_temperature_sensor_{nullptr};
@@ -143,6 +185,31 @@ class InnovaOsmo : public esphome::climate::Climate, public PollingComponent, pu
   uint32_t reference_temperature_last_update_{0};
   bool has_reference_data_{false};
   bool reference_temperature_valid_{false};        // fresco e disponibile
+  switch_::Switch *use_reference_switch_{nullptr};
+  switch_::Switch *proportional_switch_{nullptr};
+  switch_::Switch *boost_switch_{nullptr};
+  number::Number *boost_on_number_{nullptr};
+  number::Number *boost_hysteresis_number_{nullptr};
+  number::Number *deadband_number_{nullptr};
+  number::Number *offset_filter_number_{nullptr};
+  number::Number *timeout_number_{nullptr};
+  sensor::Sensor *offset_sensor_{nullptr};
+  sensor::Sensor *written_setpoint_sensor_{nullptr};
+  sensor::Sensor *true_error_sensor_{nullptr};
+  binary_sensor::BinarySensor *boost_active_sensor_{nullptr};
+  // Boost ventola (boost_on_ > 0)
+  float boost_on_{0.0f};
+  float boost_off_{0.0f};
+  bool boost_active_{false};       // il massimo lo ha messo il boost, non l'utente
+  bool boost_suppressed_{false};   // l'utente ha cambiato la ventola a mano: niente boost finche' l'errore non rientra
+
+  // Compensazione proporzionale (compensation_proportional_ = true)
+  bool compensation_proportional_{false};
+  float offset_filter_{0.25f};                      // peso del nuovo campione nell'offset
+  float offset_{0.0f};                              // T interna - T esterna, filtrato
+  bool offset_valid_{false};
+  bool fresh_reference_sample_{false};              // nuovo valore Z arrivato da HA
+  float y_filtered_{NAN};                           // T interna filtrata (EWMA) per calcolare l'offset
   uint16_t last_written_setpoint_raw_{0xFFFF};      // per evitare scritture ridondanti
   ESPPreferenceObject target_temp_pref_;            // X sopravvive al reboot quando 305 contiene W
   bool target_temperature_known_{false};            // vedi bootstrap in setup()/on_modbus_data()

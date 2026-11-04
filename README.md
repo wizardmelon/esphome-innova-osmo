@@ -169,26 +169,101 @@ have a thermometer entity in Home Assistant (any integration — Zigbee2MQTT,
 ZHA, WiFi, whatever), you can point the climate at it instead:
 
 - `current_temperature` is taken from the external sensor (falling back to the
-  on-board one if the external sensor goes stale).
-- The setpoint written to register 305 is dynamically compensated so the
-  fancoil keeps running, using its own sensor as reference, until the *real*
-  room — not its own sensor — reaches the target you set in HA. A deadband
-  (`reference_temperature_deadband`, default 0.3 °C) prevents the correction
-  from flip-flopping direction near convergence due to sensor noise, and a
-  0.5 °C minimum margin keeps decent airflow even a fraction of a degree from
-  target.
+  on-board one if the external sensor goes stale or is switched off).
+- The setpoint written to register 305 is compensated so the fancoil keeps
+  running, using its own sensor as reference, until the *real* room — not its
+  own sensor — reaches the target you set in HA. Two modes, see below.
 - A diagnostic `problem` binary sensor flips on when the external sensor
-  hasn't reported within `reference_temperature_timeout` (default 60 min —
-  generous enough for battery Zigbee sensors that only report hourly, but far
-  short of a full day of staleness). While stale, the component falls back to
-  writing your target directly (no compensation), same as when the feature
+  hasn't reported within `reference_temperature_timeout` (default 60 min;
+  battery Zigbee sensors that only report on change can stay silent for hours,
+  so 240 min is a better value for them). While stale, the component falls back
+  to writing your target directly (no compensation), same as when the feature
   isn't configured at all.
 
-See the commented-out block in `example-fancoil.yaml` (`sensor: platform:
-homeassistant` + the `reference_temperature_*` keys under `climate:`) —
-uncomment it and set `entity_id` to your thermometer to enable it. Uses the
-device's existing `api:` connection to Home Assistant, no MQTT or extra
-credentials needed.
+See the commented-out blocks in `example-fancoil.yaml`. Uses the device's
+existing `api:` connection to Home Assistant, no MQTT or extra credentials
+needed.
+
+### Compensation modes
+
+How the board sees the room: it runs its own thermostat against its own sensor
+`Y`. The component never changes that; it only changes the setpoint `W` it is
+told, so that `W - Y` equals the *real* error `X - Z` (`X` = your target, `Z` =
+external thermometer).
+
+| Mode | Setpoint written | Behaviour |
+| --- | --- | --- |
+| **deadband** (default, classic) | `W = Y` while `abs(Z - X) <= deadband`; otherwise `W = Y -/+ (abs(g) + max(0.25*abs(g), 0.5))` with `g = Z - X` | Steps. Robust, but the board sees only "far" or "near", so the automatic fan speed is coarse. |
+| **proportional** | `W = X + offset`, `offset` = filtered `Y - Z`, updated each time `Z` reports | Continuous. The board sees the true error, so its automatic fan and its own hysteresis behave like a normal fancoil with a good sensor. Offset is clamped to +/-5 K; `W` to 16-30 °C. |
+
+Proportional is the better of the two once the thermometer reports often
+enough (the offset only updates when a new `Z` arrives). If the thermometer is
+moved, press **Reset offset** to restart the estimate.
+
+### Automatic boost
+
+When the *true* error (`X - Z` heating, `Z - X` cooling) reaches the boost
+threshold, the fan is forced to max; it returns to auto when the error drops
+below `threshold - hysteresis`. Typical use: a room that is far from target
+after being away (or overnight) recovers much faster. The boost never touches
+the fan while the unit is in standby, in auto mode, or without a fresh external
+thermometer, and if you pick a fan speed by hand it stays out of the way until
+the error has recovered. **Max fan is loud** — leave it off in bedrooms you
+sleep in, or raise the threshold.
+
+### Runtime controls and diagnostics in Home Assistant
+
+All optional and independent: link only what you want (`climate:` options
+`use_reference_switch`, `proportional_switch`, `boost_switch`,
+`boost_on_number`, `boost_hysteresis_number`, `deadband_number`,
+`offset_filter_number`, `timeout_number`, each a template `switch:`/`number:`
+of yours — see the example file). The component reads their state on every
+use, so changes take effect immediately and nothing needs reflashing; with
+`restore_mode`/`restore_value` they survive reboots. If an entity is not linked,
+the build-time option applies (`reference_compensation`, `reference_offset_filter`,
+`boost_on`/`boost_off`, `reference_temperature_deadband`, `reference_temperature_timeout`).
+
+| Entity | Purpose | Sensible values |
+| --- | --- | --- |
+| Use external thermometer (switch) | Off = behave as if no external sensor | on |
+| Proportional compensation (switch) | off = deadband, on = proportional | try on |
+| Automatic boost (switch) | enable boost | off in bedrooms |
+| Boost error threshold (number) | K of true error that starts the boost | 1.0 |
+| Boost hysteresis (number) | boost ends at `threshold - hysteresis` | 0.5 |
+| Deadband (number) | deadband mode only | 0.3 |
+| Offset filter (number) | proportional mode: weight of each new offset sample (lower = smoother) | 0.25 |
+| Thermometer timeout (number, min) | stale-sensor limit | 240 for Zigbee |
+
+Optional diagnostic entities (`offset_sensor`, `written_setpoint_sensor`,
+`true_error_sensor`, `boost_active_sensor`) expose what the controller is doing,
+handy for tuning. A **Reset offset** button can call `reset_offset()` (see
+example).
+
+### Choosing or averaging thermometers from Home Assistant
+
+The `homeassistant` sensor subscribes to a fixed entity chosen at compile time.
+To change thermometers — or average several — without reflashing, subscribe to a
+Home Assistant template sensor and edit the choice there. Example: an
+`input_text` per room holding a comma-separated entity list, and a template that
+averages the numeric ones (ignoring unavailable):
+
+```yaml
+template:
+  - sensor:
+      - name: "Fancoil reference living room"
+        unique_id: fancoil_reference_living_room
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        state: >-
+          {% set ns = namespace(v=[]) %}{% for e in states('input_text.fancoil_reference_living_room').split(',') %}{% set x = states(e | trim) | float(none) %}{% if x is number %}{% set ns.v = ns.v + [x] %}{% endif %}{% endfor %}{{ (ns.v | sum / ns.v | count) | round(2) if ns.v | count > 0 else 'unavailable' }}
+        availability: >-
+          {% set ns = namespace(v=[]) %}{% for e in states('input_text.fancoil_reference_living_room').split(',') %}{% set x = states(e | trim) | float(none) %}{% if x is number %}{% set ns.v = ns.v + [x] %}{% endif %}{% endfor %}{{ ns.v | count > 0 }}
+```
+
+Then `reference_temperature_entity: sensor.fancoil_reference_living_room`. If no
+listed thermometer is available the sensor becomes unavailable and the fancoil
+falls back to its own sensor.
 
 ## Reverse-engineering toolkit
 

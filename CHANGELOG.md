@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.0 — 2026-11-04
+
+**Smarter use of the external thermometer, tunable from Home Assistant.**
+
+- **Proportional compensation** (`reference_compensation: proportional`): writes
+  `W = X + offset` with a filtered `Y - Z` offset instead of the stepped
+  deadband, so the board sees the true room error and its automatic fan speed
+  and hysteresis work as on a normal fancoil. Deadband stays the default.
+- **Automatic boost**: fan to max when the true error exceeds a threshold, back
+  to auto below `threshold - hysteresis`; stays out of the way of manual fan
+  choices, standby and auto mode.
+- **Runtime entities** (all optional): switches for external thermometer /
+  proportional mode / boost, numbers for boost threshold, hysteresis, deadband,
+  offset filter and thermometer timeout, and a `reset_offset()` hook for a
+  button. No reflash needed to tune.
+- **Diagnostics**: offset, written setpoint, true error, boost-active sensors.
+- When the "use external thermometer" switch is off the component behaves as
+  if no external sensor were configured (and the problem sensor stays off).
+- Docs: README now covers the modes, boost, the runtime controls, and how to
+  choose/average thermometers from Home Assistant with a template sensor;
+  battery Zigbee thermometers need `reference_temperature_timeout` around 240 min.
+
 ## v0.3.5 — 2026-07-29
 
 **Docs: carrier board published.** The 3D-printed carrier board (D1 mini +

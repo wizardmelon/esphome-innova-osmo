@@ -102,14 +102,107 @@ modbus:
 # integration: Zigbee2MQTT, ZHA, WiFi, etc.) instead of the on-board sensor.
 # Nothing else needed: the component already hooks into the "api:" connection
 # defined above, no MQTT or extra credentials required.
+# TIP: to average several thermometers or change the choice without reflashing,
+# point entity_id at a Home Assistant template sensor (see README).
 #
 # sensor:
 #   - platform: homeassistant
 #     id: reference_temperature
 #     entity_id: ${reference_temperature_entity}
 
+# --- Runtime controls in Home Assistant (optional, needs the block above) -----
+# Everything below is tunable from HA without reflashing. The values here are the
+# initial ones; afterwards the last value you set is restored.
+#
+# switch:
+#   - platform: template
+#     id: sw_use_reference
+#     name: Use external thermometer
+#     optimistic: true
+#     restore_mode: RESTORE_DEFAULT_ON
+#     entity_category: config
+#   - platform: template
+#     id: sw_proportional
+#     name: Proportional compensation
+#     optimistic: true
+#     restore_mode: RESTORE_DEFAULT_OFF   # off = classic deadband mode
+#     entity_category: config
+#   - platform: template
+#     id: sw_boost
+#     name: Automatic boost
+#     optimistic: true
+#     restore_mode: RESTORE_DEFAULT_OFF
+#     entity_category: config
+# number:
+#   - platform: template
+#     id: num_boost_on
+#     name: Boost error threshold
+#     unit_of_measurement: "K"
+#     optimistic: true
+#     restore_value: true
+#     initial_value: 1.0
+#     min_value: 0.3
+#     max_value: 3.0
+#     step: 0.1
+#     mode: box
+#     entity_category: config
+#   - platform: template
+#     id: num_boost_hysteresis
+#     name: Boost hysteresis
+#     unit_of_measurement: "K"
+#     optimistic: true
+#     restore_value: true
+#     initial_value: 0.5
+#     min_value: 0.1
+#     max_value: 2.0
+#     step: 0.1
+#     mode: box
+#     entity_category: config
+#   - platform: template
+#     id: num_deadband
+#     name: Deadband
+#     unit_of_measurement: "K"
+#     optimistic: true
+#     restore_value: true
+#     initial_value: 0.3
+#     min_value: 0.1
+#     max_value: 1.5
+#     step: 0.05
+#     mode: box
+#     entity_category: config
+#   - platform: template
+#     id: num_offset_filter
+#     name: Offset filter
+#     optimistic: true
+#     restore_value: true
+#     initial_value: 0.25
+#     min_value: 0.05
+#     max_value: 1.0
+#     step: 0.05
+#     mode: box
+#     entity_category: config
+#   - platform: template
+#     id: num_ref_timeout
+#     name: Thermometer timeout
+#     unit_of_measurement: "min"
+#     optimistic: true
+#     restore_value: true
+#     initial_value: 240
+#     min_value: 10
+#     max_value: 720
+#     step: 10
+#     mode: box
+#     entity_category: config
+# button:
+#   - platform: template
+#     name: Reset offset
+#     entity_category: config
+#     on_press:
+#       - lambda: id(fancoil_climate).reset_offset();
+
 climate:
   - platform: innova_osmo
+    id: fancoil_climate   # needed only for the "Reset offset" button
     name: ""              # main climate entity: takes friendly_name
     address: 1            # mainboard slave address (verified: 1)
     update_interval: 10s
@@ -147,3 +240,29 @@ climate:
     # reference_temperature_deadband: ${reference_temperature_deadband}
     # reference_temperature_problem:
     #   name: External thermometer unavailable
+    #
+    # Build-time defaults (used when the runtime entities below are not linked):
+    # reference_compensation: deadband      # or "proportional"
+    # reference_offset_filter: 0.25
+    # boost_on: 0                           # K of real error; 0 = boost disabled
+    # boost_off: 0.5
+    #
+    # Link the runtime controls (all optional, link any subset):
+    # use_reference_switch: sw_use_reference
+    # proportional_switch: sw_proportional
+    # boost_switch: sw_boost
+    # boost_on_number: num_boost_on
+    # boost_hysteresis_number: num_boost_hysteresis
+    # deadband_number: num_deadband
+    # offset_filter_number: num_offset_filter
+    # timeout_number: num_ref_timeout
+    #
+    # Diagnostics (optional):
+    # offset_sensor:
+    #   name: Offset internal-external
+    # written_setpoint_sensor:
+    #   name: Written setpoint
+    # true_error_sensor:
+    #   name: True error
+    # boost_active_sensor:
+    #   name: Boost active

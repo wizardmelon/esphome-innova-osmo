@@ -13,6 +13,35 @@ static const uint16_t POLL_REGISTERS[] = {REG_AIR_TEMP,  REG_SETPOINT, REG_PROGR
                                            REG_STATUS,    REG_WATER_TEMP, REG_FAN_SPEED};
 static const int POLL_STATES = sizeof(POLL_REGISTERS) / sizeof(POLL_REGISTERS[0]);
 
+// --- parametri runtime (entita' HA opzionali, altrimenti default di configurazione) ---
+static float number_or(number::Number *n, float fallback) {
+  return (n != nullptr && n->has_state() && !std::isnan(n->state)) ? n->state : fallback;
+}
+bool InnovaOsmo::use_reference_() const {
+  return this->reference_temperature_sensor_ != nullptr &&
+         (this->use_reference_switch_ == nullptr || this->use_reference_switch_->state);
+}
+bool InnovaOsmo::proportional_() const {
+  return this->proportional_switch_ != nullptr ? this->proportional_switch_->state : this->compensation_proportional_;
+}
+bool InnovaOsmo::boost_enabled_() const {
+  return this->boost_switch_ != nullptr ? this->boost_switch_->state : this->boost_on_ > 0.0f;
+}
+float InnovaOsmo::boost_on_value_() const { return number_or(this->boost_on_number_, this->boost_on_); }
+float InnovaOsmo::boost_off_value_() const {
+  float on = this->boost_on_value_();
+  float off = this->boost_hysteresis_number_ != nullptr ? on - number_or(this->boost_hysteresis_number_, 0.5f)
+                                                         : this->boost_off_;
+  return off < 0.0f ? 0.0f : off;
+}
+float InnovaOsmo::deadband_value_() const { return number_or(this->deadband_number_, this->reference_temperature_deadband_); }
+float InnovaOsmo::offset_filter_value_() const { return number_or(this->offset_filter_number_, this->offset_filter_); }
+uint32_t InnovaOsmo::timeout_ms_value_() const {
+  if (this->timeout_number_ != nullptr && this->timeout_number_->has_state() && !std::isnan(this->timeout_number_->state))
+    return uint32_t(this->timeout_number_->state * 60.0f * 1000.0f);
+  return this->reference_temperature_timeout_ms_;
+}
+
 void InnovaOsmo::setup() {
   if (this->reference_temperature_sensor_ == nullptr)
     return;
@@ -38,6 +67,7 @@ void InnovaOsmo::setup() {
     this->reference_temperature_ = state;
     this->reference_temperature_last_update_ = millis();
     this->has_reference_data_ = true;
+    this->fresh_reference_sample_ = true;
   });
   if (this->reference_temperature_sensor_->has_state() && !std::isnan(this->reference_temperature_sensor_->state)) {
     this->reference_temperature_ = this->reference_temperature_sensor_->state;
@@ -76,6 +106,7 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
   switch (this->state_) {
     case 1:  // REG_AIR_TEMP
       this->internal_air_temperature_ = f_value;
+      this->y_filtered_ = std::isnan(this->y_filtered_) ? f_value : this->y_filtered_ + 0.3f * (f_value - this->y_filtered_);
       if (this->air_temperature_sensor_ != nullptr)
         this->air_temperature_sensor_->publish_state(f_value);
 
@@ -83,6 +114,7 @@ void InnovaOsmo::on_modbus_data(const std::vector<uint8_t> &data) {
         this->update_reference_temperature_status_();
         this->current_temperature = this->reference_temperature_valid_ ? this->reference_temperature_ : f_value;
         this->update_setpoint_compensation_();
+        this->update_boost_();
       } else {
         this->current_temperature = f_value;
       }
@@ -249,6 +281,11 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_fan_mode().has_value()) {
+    // Cambio manuale della ventola: il boost non la tocca piu' finche' l'errore non rientra sotto boost_off.
+    if (this->boost_enabled_()) {
+      this->boost_active_ = false;
+      this->boost_suppressed_ = true;
+    }
     climate::ClimateFanMode fan_mode = *call.get_fan_mode();
     this->fan_mode = fan_mode;
     uint16_t prg = this->program_ & ~PROGRAM_FAN_MASK;
@@ -278,11 +315,13 @@ void InnovaOsmo::control(const climate::ClimateCall &call) {
 }
 
 void InnovaOsmo::update_reference_temperature_status_() {
-  bool fresh = this->has_reference_data_ &&
-               (millis() - this->reference_temperature_last_update_ <= this->reference_temperature_timeout_ms_);
+  bool use = this->use_reference_();
+  bool fresh = use && this->has_reference_data_ &&
+               (millis() - this->reference_temperature_last_update_ <= this->timeout_ms_value_());
   this->reference_temperature_valid_ = fresh;
+  // Termometro escluso a mano (interruttore spento) non e' un problema.
   if (this->reference_temperature_problem_sensor_ != nullptr)
-    this->reference_temperature_problem_sensor_->publish_state(!fresh);
+    this->reference_temperature_problem_sensor_->publish_state(use && !fresh);
 }
 
 // Ricalcola il setpoint da scrivere sul registro 305 (W) per compensare la
@@ -296,6 +335,37 @@ void InnovaOsmo::update_reference_temperature_status_() {
 //
 // Senza dato fresco dal sensore esterno si torna a scrivere X direttamente
 // (comportamento identico a quando la funzione non e' configurata).
+// Modalita' proporzionale: la scheda confronta il setpoint scritto (W) con la propria temperatura Y.
+// Scrivendo W = X + offset, con offset = Y - Z misurato quando arriva un nuovo valore del termometro
+// esterno Z (filtrato), l'errore che la scheda vede e' W - Y = X - (Y - offset) = X - Z_stimato:
+// l'errore VERO della stanza. Tra due valori di Z, Y insegue la stanza e la scheda ricalcola da sola,
+// quindi non serve riscrivere W: cambia solo quando cambia l'offset. La ventola automatica e
+// l'isteresi della scheda lavorano come in un fancoil normale, con il sensore giusto.
+float InnovaOsmo::compute_proportional_setpoint_(float x) {
+  float y = this->internal_air_temperature_;
+  if (std::isnan(y))
+    return x;
+  if (this->fresh_reference_sample_) {
+    this->fresh_reference_sample_ = false;
+    float y_f = std::isnan(this->y_filtered_) ? y : this->y_filtered_;
+    float measured = y_f - this->reference_temperature_;
+    if (!this->offset_valid_) {
+      this->offset_ = measured;
+      this->offset_valid_ = true;
+    } else {
+      this->offset_ += this->offset_filter_value_() * (measured - this->offset_);
+    }
+    ESP_LOGD(TAG, "offset Y-Z: misurato %.2f, filtrato %.2f (Y_f %.2f, Z %.2f)", measured, this->offset_, y_f,
+             this->reference_temperature_);
+  }
+  if (!this->offset_valid_)
+    return x;
+  float off = this->offset_;
+  if (off > 5.0f) off = 5.0f;
+  if (off < -5.0f) off = -5.0f;
+  return x + off;
+}
+
 void InnovaOsmo::update_setpoint_compensation_() {
   if (std::isnan(this->target_temperature))
     return;  // target non ancora noto (primo avvio, prima di un set point da HA)
@@ -305,11 +375,13 @@ void InnovaOsmo::update_setpoint_compensation_() {
 
   if (!this->reference_temperature_valid_) {
     w = x;
+  } else if (this->proportional_()) {
+    w = this->compute_proportional_setpoint_(x);
   } else {
     float y = this->internal_air_temperature_;
     float g = this->reference_temperature_ - x;
     float abs_g = fabsf(g);
-    if (abs_g <= this->reference_temperature_deadband_) {
+    if (abs_g <= this->deadband_value_()) {
       w = y;
     } else {
       float sign = (g > 0) ? 1.0f : -1.0f;
@@ -331,7 +403,55 @@ void InnovaOsmo::update_setpoint_compensation_() {
   if (raw != this->last_written_setpoint_raw_) {
     add_to_queue(CMD_WRITE_REG, raw, REG_SETPOINT);
     this->last_written_setpoint_raw_ = raw;
+    if (this->written_setpoint_sensor_ != nullptr)
+      this->written_setpoint_sensor_->publish_state(raw / 10.0f);
   }
+  if (this->offset_sensor_ != nullptr && this->offset_valid_ && this->reference_temperature_valid_ &&
+      this->proportional_())
+    this->offset_sensor_->publish_state(this->offset_);
+}
+
+// Boost ventola: errore vero e = X - Z (riscaldamento) o Z - X (raffreddamento). Sopra boost_on la ventola
+// va al massimo (programma bit0-2 = 2), sotto boost_off torna in automatico (0). Non interviene in standby,
+// senza termometro esterno fresco, in modo auto (HEAT_COOL) o se l'utente ha scelto una ventola a mano.
+void InnovaOsmo::update_boost_() {
+  float x = this->target_temperature;
+  float on = this->boost_on_value_();
+  float off = this->boost_off_value_();
+  bool ref_ok = this->reference_temperature_valid_ && !std::isnan(x) &&
+                (this->mode == climate::CLIMATE_MODE_HEAT || this->mode == climate::CLIMATE_MODE_COOL);
+  float err = 0.0f;
+  if (ref_ok)
+    err = (this->mode == climate::CLIMATE_MODE_HEAT) ? (x - this->reference_temperature_)
+                                                    : (this->reference_temperature_ - x);
+  if (this->true_error_sensor_ != nullptr && ref_ok)
+    this->true_error_sensor_->publish_state(err);
+
+  bool usable = ref_ok && this->boost_enabled_() && on > 0.0f && !(this->program_ & PROGRAM_STANDBY_MASK);
+
+  if (!usable || err < off) {
+    this->boost_suppressed_ = false;  // errore rientrato: l'utente riprende il controllo della ventola
+    if (this->boost_active_) {
+      this->boost_active_ = false;
+      if ((this->program_ & PROGRAM_FAN_MASK) == 2) {
+        uint16_t prg = this->program_ & ~PROGRAM_FAN_MASK;  // 0 = auto
+        add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+        this->program_ = prg;
+        this->fan_mode = climate::CLIMATE_FAN_AUTO;
+        ESP_LOGI(TAG, "Boost off (errore %.2f)", err);
+      }
+    }
+  } else if (err >= on && !this->boost_active_ && !this->boost_suppressed_ &&
+             (this->program_ & PROGRAM_FAN_MASK) == 0) {
+    uint16_t prg = (this->program_ & ~PROGRAM_FAN_MASK) | 2;  // max
+    add_to_queue(CMD_WRITE_REG, prg, REG_PROGRAM);
+    this->program_ = prg;
+    this->fan_mode = climate::CLIMATE_FAN_HIGH;
+    this->boost_active_ = true;
+    ESP_LOGI(TAG, "Boost on (errore %.2f)", err);
+  }
+  if (this->boost_active_sensor_ != nullptr)
+    this->boost_active_sensor_->publish_state(this->boost_active_);
 }
 
 void InnovaOsmo::dump_config() {
