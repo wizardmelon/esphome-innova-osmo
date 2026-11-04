@@ -53,23 +53,16 @@ void InnovaOsmo::setup() {
   // assoluto) update_setpoint_compensation_() deve poter riconoscerlo ed
   // astenersi dallo scrivere finche' l'utente non imposta un target da HA.
   this->target_temperature = NAN;
-  // Chiave fissa: una sola climate per dispositivo. In precedenza la chiave includeva l'hash dell'object id,
-  // che cambia se si aggiunge/toglie "id:" o si rinomina l'entita': il target salvato andava perso al flash
-  // e al suo posto si rileggeva W (setpoint compensato) dal registro 305. La vecchia chiave resta come migrazione.
-  const uint32_t base_key = fnv1_hash("innova_osmo_target_temp");
-  this->target_temp_pref_ = global_preferences->make_preference<float>(base_key);
+  // Chiave fissa (una sola climate per dispositivo). ATTENZIONE su ESP8266: le preferenze stanno in flash in
+  // ordine di registrazione (make_preference), quindi aggiungere/togliere entita' con restore (switch, number
+  // template...) prima di questa sposta lo slot e il target salvato risulta illeggibile al primo avvio dopo il
+  // flash: in quel caso sotto si rilegge il registro 305, che puo' contenere W invece di X. Dopo aver cambiato
+  // le entita' conviene reimpostare il target da HA una volta.
+  this->target_temp_pref_ = global_preferences->make_preference<float>(fnv1_hash("innova_osmo_target_temp"));
   float loaded_target;
   if (this->target_temp_pref_.load(&loaded_target)) {
     this->target_temperature = loaded_target;
     this->target_temperature_known_ = true;
-  } else {
-    auto legacy_pref = global_preferences->make_preference<float>(base_key ^ this->get_object_id_hash());
-    if (legacy_pref.load(&loaded_target)) {
-      this->target_temperature = loaded_target;
-      this->target_temperature_known_ = true;
-      this->target_temp_pref_.save(&loaded_target);
-      ESP_LOGI(TAG, "Target %.1f recuperato dalla chiave preferenze precedente", loaded_target);
-    }
   }
 
   this->reference_temperature_sensor_->add_on_state_callback([this](float state) {

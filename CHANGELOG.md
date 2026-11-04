@@ -1,15 +1,19 @@
 # Changelog
 
-## v0.4.1 — 2026-11-04
+## v0.4.2 — 2026-11-04
 
-**Fix: the saved target could be lost when reflashing.** With an external
-thermometer configured, the real target `X` is stored in flash because register
-305 holds the compensated value `W`. The storage key included a hash of the
-entity's object id, so adding an `id:` to the climate (or renaming it) changed
-the key; after the next flash the target was "lost" and re-read from register
-305, i.e. `W`, leaving a wrong setpoint. The key is now fixed (one climate per
-device) and the old key is read once as a migration, so the target survives
-the upgrade as well.
+**Fix: the saved target could be lost when reflashing (ESP8266).** With an
+external thermometer configured, the real target `X` is kept in flash because
+register 305 holds the compensated value `W`. On the ESP8266 preference slots
+are allocated in registration order, so adding or removing entities that
+restore state (template switches/numbers…) shifts the slot and the target
+becomes unreadable after the next flash; it was then re-read from register 305,
+i.e. `W`, leaving a wrong setpoint. The storage key is now fixed and the code
+documents the caveat: after changing the set of restoring entities, set the
+target again from Home Assistant once.
+
+v0.4.1 tried the same fix with a legacy-key migration that itself added a
+preference slot and so did not help; use v0.4.2.
 
 ## v0.4.0 — 2026-11-04
 
